@@ -1,0 +1,37 @@
+{
+  "name": "musicbrainz-mcp-server",
+  "version": "0.1.0",
+  "description": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads/musicbrainz-mcp-server#readme"
+  },
+  "homepage": "https://github.com/cyanheads/musicbrainz-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/musicbrainz-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": [
+    "musicbrainz",
+    "cover-art-archive",
+    "music-metadata",
+    "discography",
+    "mbid",
+    "isrc",
+    "iswc",
+    "music",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol"
+  ],
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "musicbrainz-mcp-server",
+    "shortDescription": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art via MCP. STDIO or Streamable HTTP.",
+    "longDescription": "Read-only access to the MusicBrainz Web Service v2 and the Cover Art Archive. Full-text search across artists, release-groups, releases, recordings, works, and labels; entity lookups that fold in discographies, tracklists, and relationships; complete linked-set enumeration via browse; deterministic ISRC/ISWC/barcode resolution; and Cover Art Archive image fetch. Keyless and CC0 core data, rate-limited to ~1 request/second against MusicBrainz.",
+    "developerName": "cyanheads",
+    "category": "data",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/cyanheads/musicbrainz-mcp-server",
+    "defaultPrompt": []
+  }
+}

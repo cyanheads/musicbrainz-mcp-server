@@ -1,0 +1,23 @@
+{
+  "name": "musicbrainz-mcp-server",
+  "version": "0.1.0",
+  "description": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads/musicbrainz-mcp-server#readme"
+  },
+  "homepage": "https://github.com/cyanheads/musicbrainz-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/musicbrainz-mcp-server",
+  "license": "Apache-2.0",
+  "mcpServers": {
+    "musicbrainz-mcp-server": {
+      "command": "npx",
+      "args": ["-y", "@cyanheads/musicbrainz-mcp-server"],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "MUSICBRAINZ_CONTACT": "${MUSICBRAINZ_CONTACT}"
+      }
+    }
+  }
+}

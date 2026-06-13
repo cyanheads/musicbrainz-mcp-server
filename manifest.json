@@ -1,0 +1,41 @@
+{
+  "manifest_version": "0.3",
+  "name": "musicbrainz-mcp-server",
+  "version": "0.1.0",
+  "description": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art.",
+  "author": { "name": "cyanheads" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cyanheads/musicbrainz-mcp-server"
+  },
+  "homepage": "https://github.com/cyanheads/musicbrainz-mcp-server#readme",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "MCP_AUTH_MODE": "none",
+        "NODE_ENV": "production",
+        "MUSICBRAINZ_CONTACT": "${user_config.musicbrainz_contact}"
+      }
+    }
+  },
+  "compatibility": {
+    "runtimes": { "node": ">=24.0.0" }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "user_config": {
+    "musicbrainz_contact": {
+      "type": "string",
+      "title": "MusicBrainz Contact",
+      "description": "Contact (email or URL) embedded in the mandatory descriptive MusicBrainz User-Agent. Optional — the server ships a default — but operators should set their own so MusicBrainz can reach them about traffic.",
+      "required": false,
+      "default": ""
+    }
+  }
+}
