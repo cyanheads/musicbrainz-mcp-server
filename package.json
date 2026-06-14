@@ -1,6 +1,6 @@
 {
   "name": "@cyanheads/musicbrainz-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.cyanheads/musicbrainz-mcp-server",
   "description": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art via MCP. STDIO or Streamable HTTP.",
   "type": "module",
