@@ -7,9 +7,25 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.1-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+
+</div>
+
+<div align="center">
+
+[![Install in Claude Desktop](https://img.shields.io/badge/Install_in-Claude_Desktop-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/cyanheads/musicbrainz-mcp-server/releases/latest/download/musicbrainz-mcp-server.mcpb) [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=musicbrainz-mcp-server&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBjeWFuaGVhZHMvbXVzaWNicmFpbnotbWNwLXNlcnZlciJdfQ==) [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode:mcp/install?%7B%22name%22%3A%22musicbrainz-mcp-server%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40cyanheads/musicbrainz-mcp-server%22%5D%7D)
+
+</div>
+
+<div align="center">
 
 [![Framework](https://img.shields.io/badge/Built%20on-@cyanheads/mcp--ts--core-67E8F9?style=flat-square)](https://www.npmjs.com/package/@cyanheads/mcp-ts-core)
+
+</div>
+
+<div align="center">
+
+**Public Hosted Server:** [https://musicbrainz.caseyjhand.com/mcp](https://musicbrainz.caseyjhand.com/mcp)
 
 </div>
 
@@ -134,6 +150,21 @@ Agent-friendly output:
 ## Getting started
 
 `musicbrainz-mcp-server` is keyless — no API key or account. MusicBrainz does require a descriptive `User-Agent` with a contact and rate-limits to ~1 request/second per IP; the server ships a default contact so it works out of the box, but operators running a shared or hosted instance should set `MUSICBRAINZ_CONTACT` to their own email or URL.
+
+### Public Hosted Instance
+
+A public instance is available at `https://musicbrainz.caseyjhand.com/mcp` — no installation required. Point any MCP client at it via Streamable HTTP, with this client config:
+
+```json
+{
+  "mcpServers": {
+    "musicbrainz-mcp-server": {
+      "type": "streamable-http",
+      "url": "https://musicbrainz.caseyjhand.com/mcp"
+    }
+  }
+}
+```
 
 Add the following to your MCP client configuration file.
 
