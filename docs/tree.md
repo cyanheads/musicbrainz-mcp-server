@@ -1,6 +1,6 @@
 # musicbrainz-mcp-server - Directory Structure
 
-Generated on: 2026-06-13 16:21:51
+Generated on: 2026-06-15 17:31:04
 
 ```text
 musicbrainz-mcp-server/
@@ -22,8 +22,7 @@ musicbrainz-mcp-server/
 │   ├── 0.1.x/
 │   └── template.md
 ├── docs/
-│   ├── design.md
-│   └── idea.md
+│   └── design.md
 ├── scripts/
 │   ├── build-changelog.ts
 │   ├── build.ts
