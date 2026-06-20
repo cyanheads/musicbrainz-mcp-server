@@ -1,6 +1,6 @@
 # musicbrainz-mcp-server - Directory Structure
 
-Generated on: 2026-06-15 17:31:04
+Generated on: 2026-06-20 02:53:48
 
 ```text
 musicbrainz-mcp-server/
@@ -165,6 +165,8 @@ musicbrainz-mcp-server/
 │   └── tools/
 │       ├── get-artist.test.ts
 │       ├── get-cover-art.test.ts
+│       ├── get-release-group.test.ts
+│       ├── get-work.test.ts
 │       ├── lookup-identifier.test.ts
 │       └── search-entities.test.ts
 ├── .dockerignore

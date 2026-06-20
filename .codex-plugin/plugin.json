@@ -1,6 +1,6 @@
 {
   "name": "musicbrainz-mcp-server",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads",
