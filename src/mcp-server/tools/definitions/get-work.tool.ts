@@ -1,9 +1,8 @@
 /**
  * @fileoverview musicbrainz_get_work — work (a composition, the song as written,
  * distinct from any recording) by MBID: type, language(s), ISWCs, writer/composer/
- * lyricist relationships, and the recordings that perform it. Recording relations
- * are capped at one page — musicbrainz_browse_entities (recording by work) gives
- * the complete list.
+ * lyricist relationships, and the recordings that perform it. The work lookup
+ * returns every recording relationship unbounded (no per-page cap).
  * @module mcp-server/tools/definitions/get-work.tool
  */
 
@@ -28,13 +27,10 @@ import {
   TagSchema,
 } from './_shared.js';
 
-/** One-page cap for the recording relationships embedded in a work lookup. */
-const LOOKUP_PAGE_CAP = 25;
-
 export const getWorkTool = tool('musicbrainz_get_work', {
   title: 'musicbrainz-mcp-server: get work',
   description:
-    'Work (a composition — the song as written, distinct from any specific recording) by MBID: type, language(s), ISWCs (the work-level standard identifier), writer/composer/lyricist relationships (with the credited artist MBID), aliases, tags, and the recordings that perform it. Recording relations are capped at one page; for the complete list of recordings of a work, call musicbrainz_browse_entities with target_type=recording and link.work.',
+    'Work (a composition — the song as written, distinct from any specific recording) by MBID: type, language(s), ISWCs (the work-level standard identifier), writer/composer/lyricist relationships (with the credited artist MBID), aliases, tags, and the recordings that perform it. The recording relationships are returned in full (the work lookup does not page them).',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -75,33 +71,12 @@ export const getWorkTool = tool('musicbrainz_get_work', {
     relationships: z
       .array(RelationSchema)
       .describe(
-        'Writer/composer/lyricist relationships and recording-rels (may be empty; recording-rels capped at one page).',
+        'Writer/composer/lyricist relationships and recording-rels — the complete set (may be empty).',
       ),
     externalLinks: z
       .array(ExternalLinkSchema)
       .describe('External resource links (url-rels) (may be empty).'),
   }),
-
-  enrichment: {
-    truncated: z
-      .boolean()
-      .optional()
-      .describe(
-        'True when the recording relationships hit the one-page cap. Absent when the full set fit in one page.',
-      ),
-    shown: z
-      .number()
-      .optional()
-      .describe('Number of recording relationships returned. Absent when not truncated.'),
-    cap: z
-      .number()
-      .optional()
-      .describe('The one-page cap that was applied. Absent when not truncated.'),
-    notice: z
-      .string()
-      .optional()
-      .describe('How to fetch the complete list of recordings of this work when truncated.'),
-  },
 
   async handler(input, ctx) {
     ctx.log.info('musicbrainz_get_work', { mbid: input.mbid });
@@ -122,14 +97,6 @@ export const getWorkTool = tool('musicbrainz_get_work', {
 
     const { relationships, externalLinks } = normalizeRelations(raw.relations);
     const languages = raw.languages ?? (raw.language ? [raw.language] : []);
-
-    const recordingRelCount = relationships.filter((r) => r.targetType === 'recording').length;
-    if (input.inc_relationships && recordingRelCount >= LOOKUP_PAGE_CAP) {
-      ctx.enrich.truncated({ shown: recordingRelCount, cap: LOOKUP_PAGE_CAP });
-      ctx.enrich.notice(
-        `Recording relationships capped at ${LOOKUP_PAGE_CAP}. Call musicbrainz_browse_entities (target_type=recording, link.work=${input.mbid}) for the complete list of recordings of this work.`,
-      );
-    }
 
     return {
       mbid: raw.id,
