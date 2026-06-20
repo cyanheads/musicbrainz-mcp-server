@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-06-20
+
+Adopt mcp-ts-core ^0.10.9 — devcheck now validates plugin marketplace manifests and rejects floating dependency specifiers (latest/dist-tags) in package.json + bun.lock.
+
 ## [0.1.4](changelog/0.1.x/0.1.4.md) — 2026-06-19
 
 Adopt mcp-ts-core ^0.10.8 (SQL-gate invalid_sql classification, DuckdbProvider.describe() filter fix, devcheck fresh-scaffold guards, biome 2.5); drop websiteUrl from createApp() so the server manifest emits name+title only.
