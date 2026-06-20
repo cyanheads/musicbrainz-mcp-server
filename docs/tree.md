@@ -1,9 +1,10 @@
 # musicbrainz-mcp-server - Directory Structure
 
-Generated on: 2026-06-20 02:53:48
+Generated on: 2026-06-20 05:24:46
 
 ```text
 musicbrainz-mcp-server/
+├── .agents/
 ├── .claude/
 ├── .claude-plugin/
 │   └── plugin.json
