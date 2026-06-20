@@ -16,7 +16,6 @@ import { initMusicBrainzService } from './services/musicbrainz/musicbrainz-servi
 await createApp({
   name: 'musicbrainz-mcp-server',
   title: 'musicbrainz-mcp-server',
-  websiteUrl: 'https://github.com/cyanheads/musicbrainz-mcp-server',
   tools: allToolDefinitions,
   resources: allResourceDefinitions,
   prompts: [],
