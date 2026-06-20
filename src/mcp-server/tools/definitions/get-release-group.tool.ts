@@ -2,7 +2,9 @@
  * @fileoverview musicbrainz_get_release_group — release-group ("the album" above
  * specific pressings) by MBID: primary + secondary type, first-release date,
  * artist credit, the list of releases (editions), tags/genres, and whether cover
- * art exists. Use musicbrainz_get_release for a specific edition's tracklist.
+ * art exists. The embedded releases list is capped at one page by the lookup
+ * endpoint — musicbrainz_browse_entities (release by release-group) gives the
+ * complete set. Use musicbrainz_get_release for a specific edition's tracklist.
  * @module mcp-server/tools/definitions/get-release-group.tool
  */
 
@@ -40,10 +42,13 @@ const ReleaseRefSchema = z
   })
   .describe('A release (edition) within the release-group.');
 
+/** One-page cap for the releases (editions) embedded in a release-group lookup. */
+const LOOKUP_PAGE_CAP = 25;
+
 export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
   title: 'musicbrainz-mcp-server: get release group',
   description:
-    'Release-group ("the album" above specific pressings) by MBID: primary type (Album/Single/EP) and secondary types (Live/Compilation), first-release date, artist credit, the list of releases (editions), tags/genres, and a cover-art availability flag from the WS/2 payload (use musicbrainz_get_cover_art for actual image URLs). For a specific edition\'s tracklist, take a release MBID from the releases list and call musicbrainz_get_release.',
+    'Release-group ("the album" above specific pressings) by MBID: primary type (Album/Single/EP) and secondary types (Live/Compilation), first-release date, artist credit, the list of releases (editions), tags/genres, and a cover-art availability flag from the WS/2 payload (use musicbrainz_get_cover_art for actual image URLs). The embedded releases list is capped at one page (25); for the complete set of editions, call musicbrainz_browse_entities with target_type=release and link.release-group. For a specific edition\'s tracklist, take a release MBID from the releases list and call musicbrainz_get_release.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -88,12 +93,35 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       .describe('Display string of the artist credit with join phrases.'),
     releases: z
       .array(ReleaseRefSchema)
-      .describe('Releases (editions) in this group (may be empty).'),
+      .describe(
+        'Releases (editions) in this group (one page; may be empty or capped — use browse for all).',
+      ),
     tags: z.array(TagSchema).describe('Community tags/genres (may be empty).'),
     coverArt: CoverArtStubSchema.describe(
       'Whether cover art exists (availability stub from WS/2).',
     ),
   }),
+
+  enrichment: {
+    truncated: z
+      .boolean()
+      .optional()
+      .describe(
+        'True when the releases list hit the one-page cap and more editions exist. Absent when the full set fit in one page.',
+      ),
+    shown: z
+      .number()
+      .optional()
+      .describe('Number of releases returned. Absent when not truncated.'),
+    cap: z
+      .number()
+      .optional()
+      .describe('The one-page cap that was applied. Absent when not truncated.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('How to fetch the complete list of editions when truncated.'),
+  },
 
   async handler(input, ctx) {
     ctx.log.info('musicbrainz_get_release_group', { mbid: input.mbid });
@@ -124,6 +152,13 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       ...(r.status ? { status: r.status } : {}),
       ...(r.disambiguation ? { disambiguation: r.disambiguation } : {}),
     }));
+
+    if (releases.length >= LOOKUP_PAGE_CAP) {
+      ctx.enrich.truncated({ shown: releases.length, cap: LOOKUP_PAGE_CAP });
+      ctx.enrich.notice(
+        `Releases capped at ${LOOKUP_PAGE_CAP}. Call musicbrainz_browse_entities (target_type=release, link.release-group=${input.mbid}) to enumerate the complete set of editions.`,
+      );
+    }
 
     return {
       mbid: raw.id,
