@@ -123,6 +123,27 @@ describe('MusicBrainzService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('requests inc=artist-credits on the ISRC endpoint so the artist credit is populated', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        isrc: 'USRC17607839',
+        recordings: [
+          {
+            id: 'rec1',
+            title: 'Crazy Eyes',
+            'artist-credit': [{ name: 'Daryl Hall & John Oates' }],
+          },
+        ],
+      }),
+    );
+    const ctx = createMockContext({ tenantId: 'test' });
+    await makeService().resolveIsrc('USRC17607839', ctx);
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toContain('/isrc/USRC17607839');
+    expect(url).toContain('inc=artist-credits');
+    expect(url).toContain('fmt=json');
+  });
+
   it('builds the search path with query/limit/offset', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ count: 0, artists: [] }));
     const ctx = createMockContext({ tenantId: 'test' });

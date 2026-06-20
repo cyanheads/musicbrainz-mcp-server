@@ -33,7 +33,9 @@ const RecordingHitSchema = z
   .object({
     mbid: z.string().describe('Recording MBID — chain to musicbrainz_get_recording.'),
     title: z.string().describe('Recording title.'),
-    artistCredit: z.string().describe('Credited artist string.'),
+    artistCredit: z
+      .string()
+      .describe('Credited artist string; falls back to "Unknown artist" when none is recorded.'),
     length: z.string().optional().describe('Recording length as m:ss. Omitted when unknown.'),
   })
   .describe('A recording carrying the looked-up ISRC.');
@@ -78,7 +80,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       code: JsonRpcErrorCode.InvalidParams,
       when: 'The ISRC/ISWC is malformed (the dedicated endpoint returns HTTP 400).',
       recovery:
-        'ISRC is 12 chars (e.g. USRC17607839); ISWC is T- followed by 10 digits (e.g. T-345246800-1). Verify the format.',
+        'ISRC is 12 chars (e.g. USRC17607839); ISWC is T- then three dot-separated 3-digit groups and a check digit, T-DDD.DDD.DDD-C (e.g. T-010.140.236-1). Verify the format.',
     },
   ],
 
@@ -90,7 +92,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       .string()
       .min(1)
       .describe(
-        'The identifier value. ISRC e.g. "USRC17607839"; ISWC e.g. "T-345246800-1"; barcode e.g. "075678164125".',
+        'The identifier value. ISRC e.g. "USRC17607839"; ISWC e.g. "T-010.140.236-1"; barcode e.g. "075678164125".',
       ),
   }),
 

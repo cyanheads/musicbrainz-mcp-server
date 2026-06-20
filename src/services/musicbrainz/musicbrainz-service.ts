@@ -140,12 +140,18 @@ export class MusicBrainzService {
 
   /**
    * Resolve a standard identifier to entities. ISRC and ISWC are dedicated
-   * endpoints (deterministic, no `inc` — the endpoint returns 400 if `inc` is
-   * sent); barcode is a release search filter (`?query=barcode:...`), so the
-   * caller routes that through {@link search} instead.
+   * deterministic endpoints; barcode is a release search filter
+   * (`?query=barcode:...`), so the caller routes that through {@link search}
+   * instead. The ISRC endpoint omits artist credits by default, so request
+   * `inc=artist-credits` — otherwise every recording falls back to the
+   * "Unknown artist" placeholder.
    */
   resolveIsrc(value: string, ctx: Context, options?: CallOptions): Promise<IsrcEnvelope> {
-    return this.request<IsrcEnvelope>(`/isrc/${encodeURIComponent(value)}?fmt=json`, ctx, options);
+    return this.request<IsrcEnvelope>(
+      `/isrc/${encodeURIComponent(value)}?inc=artist-credits&fmt=json`,
+      ctx,
+      options,
+    );
   }
 
   resolveIswc(value: string, ctx: Context, options?: CallOptions): Promise<BrowseEnvelope> {

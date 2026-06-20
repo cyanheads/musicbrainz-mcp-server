@@ -31,16 +31,28 @@ afterEach(() => {
 });
 
 describe('lookup_identifier', () => {
-  it('resolves an ISRC to a recordings arm', async () => {
+  it('resolves an ISRC to a recordings arm and surfaces the artist credit', async () => {
+    // The ISRC endpoint is now requested with inc=artist-credits, so the
+    // credit is populated rather than falling back to "Unknown artist".
     resolveIsrcMock.mockResolvedValueOnce({
       isrc: 'USRC17607839',
-      recordings: [{ id: 'rec1', title: 'Song', length: 200000, 'artist-credit': [] }],
+      recordings: [
+        {
+          id: 'rec1',
+          title: 'Crazy Eyes',
+          length: 184000,
+          'artist-credit': [{ name: 'Daryl Hall & John Oates', artist: { id: 'hall-oates' } }],
+        },
+      ],
     });
     const ctx = createMockContext({ tenantId: 'test' });
     const input = lookupIdentifierTool.input.parse({ id_type: 'isrc', value: 'USRC17607839' });
     const { result } = await lookupIdentifierTool.handler(input, ctx);
     expect(result.kind).toBe('recordings');
-    if (result.kind === 'recordings') expect(result.recordings[0]?.mbid).toBe('rec1');
+    if (result.kind === 'recordings') {
+      expect(result.recordings[0]?.mbid).toBe('rec1');
+      expect(result.recordings[0]?.artistCredit).toBe('Daryl Hall & John Oates');
+    }
   });
 
   it('resolves an ISWC to a works arm', async () => {
@@ -49,7 +61,7 @@ describe('lookup_identifier', () => {
       works: [{ id: 'w1', title: 'Composition' }],
     });
     const ctx = createMockContext({ tenantId: 'test' });
-    const input = lookupIdentifierTool.input.parse({ id_type: 'iswc', value: 'T-345246800-1' });
+    const input = lookupIdentifierTool.input.parse({ id_type: 'iswc', value: 'T-010.140.236-1' });
     const { result } = await lookupIdentifierTool.handler(input, ctx);
     expect(result.kind).toBe('works');
     if (result.kind === 'works') expect(result.works[0]?.title).toBe('Composition');
