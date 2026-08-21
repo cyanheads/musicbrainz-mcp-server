@@ -1,10 +1,10 @@
 # Developer Protocol
 
 **Server:** musicbrainz-mcp-server
-**Version:** 0.1.5
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.10.9`
+**Version:** 0.1.6
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.12.3`
 **Engines:** Bun ≥1.3.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/sdk` ^1.29.0
+**MCP SDK:** `@modelcontextprotocol/server` ^2.0.0
 **Zod:** ^4.4.3
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
@@ -35,7 +35,7 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 - **Logic throws, framework catches.** Tool/resource handlers are pure — throw on failure, no `try/catch`. Plain `Error` is fine; the framework catches, classifies, and formats. Use error factories (`notFound()`, `validationError()`, etc.) when the error code matters.
 - **Use `ctx.log`** for request-scoped logging. No `console` calls.
 - **Use `ctx.state`** for tenant-scoped storage. Never access persistence directly.
-- **Check `ctx.elicit`** for presence before calling.
+- **Need input the caller didn't supply?** `return ctx.requestInput(...)` and read `ctx.inputs` when the handler is re-entered. Never `await` for user input mid-handler.
 - **Secrets in env vars only** — never hardcoded.
 - **Close the loop on issues.** When implementing work tracked by a GitHub issue, comment on the issue with what landed and close it. Do both — a comment without a close leaves stale issues open; a close without a comment leaves no record of what shipped. The comment is for future readers — state the concrete changes, not the conversation that produced them.
 
@@ -45,7 +45,7 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 
 ### Tool
 
-Tools are `musicbrainz_{verb}_{noun}`, all read-only, with typed error contracts encoding the live 400-vs-404 split (`invalid_mbid` / `entity_not_found`). `search_entities` is the entry point — it resolves a name to an MBID that chains into the `get_*` tools.
+Tools are `musicbrainz_{verb}_{noun}`, all read-only, with typed error contracts encoding the live validation-vs-not-found split (`invalid_mbid` / `entity_not_found`). `search_entities` is the entry point — it resolves a name to an MBID that chains into the `get_*` tools.
 
 ```ts
 import { tool, z } from '@cyanheads/mcp-ts-core';
@@ -102,7 +102,7 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
 
 ### Resource
 
-One resource template mirrors the `get_*` lookups — the entity type is a path parameter. No `list()`: the corpus is millions of entities, so discovery is via `musicbrainz_search_entities`. The handler maps the service's `InvalidParams`/`NotFound` onto the typed `invalid_mbid` / `entity_not_found` contract via `ctx.fail` + `ctx.recoveryFor`.
+One resource template mirrors the `get_*` lookups — the entity type is a path parameter. No `list()`: the corpus is millions of entities, so discovery is via `musicbrainz_search_entities`. The handler maps the service's `ValidationError`/`NotFound` onto the typed `invalid_mbid` / `entity_not_found` contract via `ctx.fail` + `ctx.recoveryFor`.
 
 ```ts
 import { resource, z } from '@cyanheads/mcp-ts-core';
@@ -115,7 +115,7 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
   description: 'A single MusicBrainz entity by type and MBID, with default linked sub-resources folded in.',
   mimeType: 'application/json',
   errors: [
-    { reason: 'invalid_mbid', code: JsonRpcErrorCode.InvalidParams,
+    { reason: 'invalid_mbid', code: JsonRpcErrorCode.ValidationError,
       when: 'The MBID is malformed / all-zeros, or entity_type is not one of the six valid types.',
       recovery: 'Use a 36-character UUID MBID and a valid entity_type.' },
     { reason: 'entity_not_found', code: JsonRpcErrorCode.NotFound,
@@ -130,7 +130,7 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
     try {
       return await getMusicBrainzService().lookup(params.entity_type, params.mbid, { inc: DEFAULT_INC[params.entity_type] }, ctx, { signal: ctx.signal });
     } catch (error: unknown) {
-      if (error instanceof McpError && error.code === JsonRpcErrorCode.InvalidParams)
+      if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError)
         throw ctx.fail('invalid_mbid', `Malformed MBID "${params.mbid}".`, { ...ctx.recoveryFor('invalid_mbid') });
       if (error instanceof McpError && error.code === JsonRpcErrorCode.NotFound)
         throw ctx.fail('entity_not_found', `No ${params.entity_type} exists with MBID ${params.mbid}.`, { ...ctx.recoveryFor('entity_not_found') });
@@ -195,8 +195,7 @@ For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("
 ```ts
 await createApp({
   name: 'musicbrainz-mcp-server',
-  title: 'musicbrainz-mcp-server',  // must match the unscoped package name — enforced by lint:packaging
-  websiteUrl: 'https://github.com/cyanheads/musicbrainz-mcp-server',
+  title: 'musicbrainz-mcp-server',
   tools: allToolDefinitions,
   resources: allResourceDefinitions,
   prompts: [],
@@ -209,7 +208,7 @@ await createApp({
 });
 ```
 
-`description` is **not** passed to `createApp()` — the framework derives the served description from `package.json` (the canonical source). `instructions` is optional server-level orientation, sent on every `initialize` as session-level context. Use it for deployment guidance (connection aliases, scope hints, the rate-limit note) instead of repeating the same context across tool descriptions. Client adoption is uneven, but there's no downside when set.
+The in-code identity block is `name` + `title` only, both exactly `musicbrainz-mcp-server`. `description` is **not** passed to `createApp()` — the framework derives the served description from `package.json` (the canonical source). `instructions` is optional server-level orientation, sent on every `initialize` as session-level context. Use it for deployment guidance (connection aliases, scope hints, the rate-limit note) instead of repeating the same context across tool descriptions.
 
 ---
 
@@ -219,13 +218,15 @@ Handlers receive a unified `ctx` object. Key properties:
 
 | Property | Description |
 |:---------|:------------|
-| `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. |
-| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`. Backs the MusicBrainz response cache (shared across tenants — the data is public CC0). |
+| `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Dual-sink: Pino and client-visible `notifications/message`. |
+| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.getMany(keys)`, `.list(prefix, options)`. Backs the MusicBrainz response cache. |
+| `ctx.requestInput` | Suspend and ask the caller for missing input. Never returns; the handler is re-entered with responses. |
+| `ctx.inputs` | Reader over a retried request's responses. Empty on the first round. |
 | `ctx.enrich` | Provenance helpers on search/browse — `.echo(query)`, `.total(n)`, `.notice(msg)`. Surface the effective query, upstream total, and a zero-hits hint without polluting the typed output. |
 | `ctx.fail` / `ctx.recoveryFor` | Throw a typed contract error by reason (`ctx.fail('invalid_mbid', …)`); `ctx.recoveryFor(reason)` pulls the declared recovery metadata for the throw site. |
 | `ctx.signal` | `AbortSignal` for cancellation — forwarded into every upstream fetch. |
 | `ctx.requestId` | Unique request ID. |
-| `ctx.tenantId` | Tenant ID from JWT or `'default'` for stdio. |
+| `ctx.tenantId` | Tenant ID from JWT; `'default'` for stdio or HTTP with auth off. |
 
 ---
 
@@ -339,7 +340,6 @@ Available skills:
 | `tool-defs-analysis` | Read-only audit of MCP definition language across the surface — voice, leaks, defaults, recovery hints, output descriptions |
 | `security-pass` | Audit server for MCP-flavored security gaps: output injection, scope blast radius, input sinks, tenant isolation |
 | `code-simplifier` | Post-session cleanup against `git diff` — modernize syntax, consolidate duplication, align with the codebase |
-| `devcheck` | Lint, format, typecheck, audit |
 | `polish-docs-meta` | Finalize docs, README, metadata, and agent protocol for shipping |
 | `git-wrapup` | Land working-tree changes as a versioned commit + annotated tag — version bump, changelog, verify, tag. Local only. |
 | `release-and-publish` | Push + npm + MCP Registry + GH Release + Docker. Picks up from `git-wrapup` |
@@ -351,7 +351,7 @@ Available skills:
 | `api-canvas` | DataCanvas: register tabular data, run SQL, export, plus the `spillover()` helper for big result sets — Tier 3 opt-in |
 | `api-mirror` | MirrorService: stand up a self-refreshing local mirror of a bulk upstream dataset (SQLite + FTS5) — Tier 3 opt-in |
 | `api-config` | AppConfig, parseConfig, env vars |
-| `api-context` | Context interface, logger, state, progress |
+| `api-context` | Context interface, RequestContext, logger, state, multi-round-trip input |
 | `api-errors` | McpError, JsonRpcErrorCode, error patterns |
 | `api-linter` | Definition linter rule catalog — invoked by `bun run lint:mcp` and `devcheck` |
 | `api-services` | LLM, Speech, Graph services |
@@ -384,7 +384,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 | `bun run format:unsafe` | Also apply Biome's unsafe autofixes — review the diff; they can change behavior |
 | `bun run lint:mcp` | Validate MCP tool/resource definitions against the linter rules |
 | `bun run lint:packaging` | Validate `manifest.json` ↔ `server.json` env var alignment + bundle/identity guards |
-| `bun test` | Run the Vitest suite |
+| `bun run test` | Run the Vitest suite |
 | `bun run start:stdio` | Production mode (stdio) |
 | `bun run start:http` | Production mode (HTTP) |
 | `bun run changelog:build` | Regenerate `CHANGELOG.md` from `changelog/*.md` |
@@ -396,7 +396,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 
 ## Bundling
 
-`npm run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips dependency-shipped agent docs (`node_modules/**` `skills/`, `.claude/`, `.agents/`, `SKILL.md`) that root-anchored `.mcpbignore` patterns cannot reach. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
+`npm run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips dependency-shipped agent docs plus platform-specific native bindings that root-anchored `.mcpbignore` patterns cannot reach. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
 
 **Adding an env var requires both files:** `server.json` (registry discovery, `environmentVariables[]`) and `manifest.json` (bundle install UX, `mcp_config.env` + `user_config`). `lint:packaging` (run by `devcheck`) verifies the env var names match.
 
@@ -414,14 +414,14 @@ Each per-version file opens with YAML frontmatter:
 ---
 summary: "One-line headline, ≤350 chars"  # required — powers the rollup index
 breaking: false                            # optional — true flags breaking changes
-security: false                            # optional — true flags security fixes
+security: false                            # optional — true only for this project's source-code security fixes
 ---
 
 # 0.1.0 — YYYY-MM-DD
 ...
 ```
 
-`breaking: true` renders a `· ⚠️ Breaking` badge — use it when consumers must update code on upgrade (signature changes, removed APIs, config renames). `security: true` renders a `· 🛡️ Security` badge and pairs with a `## Security` body section. When both are set, badges render `· ⚠️ Breaking · 🛡️ Security`.
+`breaking: true` renders a `· ⚠️ Breaking` badge — use it when consumers must update code on upgrade (signature changes, removed APIs, config renames). `security: true` renders a `· 🛡️ Security` badge and pairs with a `## Security` body section; use it only for a fix in this server's own source, never for a dependency CVE bump. When both are set, badges render `· ⚠️ Breaking · 🛡️ Security`.
 
 `agent-notes` is an optional free-form field for maintenance agents processing the release downstream. Content here won't appear in the rendered CHANGELOG — it's consumed by agents running the `maintenance` skill. Use it for adoption instructions that don't fit the human-facing sections: new files to create, fields to populate, one-time migration steps. Omit entirely when there's nothing to say.
 

@@ -1,9 +1,13 @@
 {
   "manifest_version": "0.3",
   "name": "musicbrainz-mcp-server",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Search artists, releases, recordings, works, and labels; traverse relationships; resolve ISRC/ISWC/barcode; fetch cover art.",
-  "author": { "name": "cyanheads" },
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cyanheads/musicbrainz-mcp-server"
