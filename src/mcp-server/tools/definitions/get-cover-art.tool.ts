@@ -49,7 +49,7 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
   errors: [
     {
       reason: 'invalid_mbid',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The MBID is malformed or the all-zeros sentinel (the upstream returns HTTP 400).',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities to find a release or release-group MBID.`,
     },
@@ -89,8 +89,8 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
       raw = await service.getImages(input.entity_type, input.mbid, ctx, { signal: ctx.signal });
     } catch (error: unknown) {
       // 404 (no art) is mapped to an empty set inside the service; a 400 (malformed
-      // MBID) still surfaces here as InvalidParams.
-      if (error instanceof McpError && error.code === JsonRpcErrorCode.InvalidParams) {
+      // MBID) still surfaces here as ValidationError.
+      if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
         throw ctx.fail('invalid_mbid', undefined, {
           ...ctx.recoveryFor('invalid_mbid'),
           mbid: input.mbid,

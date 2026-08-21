@@ -60,7 +60,7 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
   errors: [
     {
       reason: 'invalid_mbid',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities to find an artist's MBID from its name.`,
     },

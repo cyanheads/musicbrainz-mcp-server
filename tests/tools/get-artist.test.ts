@@ -59,7 +59,7 @@ const fullArtist: RawArtist = {
 describe('get_artist', () => {
   it('maps a full payload, splitting relationships and url-rels', async () => {
     lookupMock.mockResolvedValueOnce(fullArtist);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getArtistTool.errors });
     const input = getArtistTool.input.parse({ mbid: fullArtist.id });
     const result = await getArtistTool.handler(input, ctx);
 
@@ -81,7 +81,7 @@ describe('get_artist', () => {
       id: 'sparse-mbid',
       name: 'Obscure Artist',
     } satisfies RawArtist);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getArtistTool.errors });
     const input = getArtistTool.input.parse({ mbid: 'sparse-mbid' });
     const result = await getArtistTool.handler(input, ctx);
 
@@ -99,11 +99,13 @@ describe('get_artist', () => {
   });
 
   it('maps an upstream 400 to ctx.fail("invalid_mbid")', async () => {
-    lookupMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'Invalid mbid.'));
+    lookupMock.mockRejectedValueOnce(
+      new McpError(JsonRpcErrorCode.ValidationError, 'Invalid mbid.'),
+    );
     const ctx = createMockContext({ tenantId: 'test', errors: getArtistTool.errors });
     const input = getArtistTool.input.parse({ mbid: '0' });
     await expect(getArtistTool.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'invalid_mbid' },
     });
   });
@@ -128,7 +130,7 @@ describe('get_artist', () => {
       name: 'Prolific',
       'release-groups': releaseGroups,
     });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getArtistTool.errors });
     const input = getArtistTool.input.parse({ mbid: 'prolific' });
     await getArtistTool.handler(input, ctx);
 

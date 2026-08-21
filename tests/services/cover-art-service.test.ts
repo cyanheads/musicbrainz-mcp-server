@@ -31,14 +31,13 @@ function makeService(cacheTtl = 0) {
 function realStorageContext(tenantId = 'test'): Context {
   const ctx = createMockContext({ tenantId });
   const storage = createInMemoryStorage();
-  const tenantCtx = { tenantId, requestId: ctx.requestId };
   return {
     ...ctx,
     state: {
       ...ctx.state,
-      get: (key, schema) => storage.get(key, tenantCtx).then((v) => (schema ? schema.parse(v) : v)),
+      get: (key, schema) => storage.get(key, ctx).then((v) => (schema ? schema.parse(v) : v)),
       set: (key, value, opts) =>
-        storage.set(key, value, tenantCtx, opts?.ttl !== undefined ? { ttl: opts.ttl } : undefined),
+        storage.set(key, value, ctx, opts?.ttl !== undefined ? { ttl: opts.ttl } : undefined),
     },
   } as Context;
 }
@@ -51,6 +50,12 @@ describe('CoverArtService', () => {
     const ctx = createMockContext({ tenantId: 'test' });
     const result = await makeService().getImages('release', 'no-art-mbid', ctx);
     expect(result).toEqual({ images: [] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Number),
+      expect.objectContaining({ requestId: ctx.requestId, operation: 'CoverArtRequest' }),
+      expect.objectContaining({ expectedStatuses: [404] }),
+    );
   });
 
   it('parses images with thumbnails and the representative release', async () => {
@@ -82,7 +87,7 @@ describe('CoverArtService', () => {
     fetchMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'bad'));
     const ctx = createMockContext({ tenantId: 'test' });
     await expect(makeService().getImages('release', 'bad', ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
     });
   });
 

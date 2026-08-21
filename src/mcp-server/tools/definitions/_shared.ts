@@ -27,7 +27,7 @@ import type {
 
 /**
  * Classify an upstream error from an MBID lookup against the MusicBrainz 400-vs-404
- * split: a malformed / all-zeros MBID returns HTTP 400 (`InvalidParams`); a
+ * split: a malformed / all-zeros MBID returns HTTP 400 (`ValidationError`); a
  * well-formed MBID with no matching entity returns HTTP 404 (`NotFound`). Returns
  * the contract reason for those two cases, or `null` for anything else (transient
  * upstream failures bubble unchanged). Handlers call `ctx.fail(reason, …)` on a
@@ -35,7 +35,7 @@ import type {
  */
 export function classifyMbidError(error: unknown): 'invalid_mbid' | 'entity_not_found' | null {
   if (!(error instanceof McpError)) return null;
-  if (error.code === JsonRpcErrorCode.InvalidParams) return 'invalid_mbid';
+  if (error.code === JsonRpcErrorCode.ValidationError) return 'invalid_mbid';
   if (error.code === JsonRpcErrorCode.NotFound) return 'entity_not_found';
   return null;
 }

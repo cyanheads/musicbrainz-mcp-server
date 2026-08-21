@@ -48,14 +48,13 @@ function jsonResponse(body: unknown) {
 function realStorageContext(tenantId = 'test'): Context {
   const ctx = createMockContext({ tenantId });
   const storage = createInMemoryStorage();
-  const tenantCtx = { tenantId, requestId: ctx.requestId };
   return {
     ...ctx,
     state: {
       ...ctx.state,
-      get: (key, schema) => storage.get(key, tenantCtx).then((v) => (schema ? schema.parse(v) : v)),
+      get: (key, schema) => storage.get(key, ctx).then((v) => (schema ? schema.parse(v) : v)),
       set: (key, value, opts) =>
-        storage.set(key, value, tenantCtx, opts?.ttl !== undefined ? { ttl: opts.ttl } : undefined),
+        storage.set(key, value, ctx, opts?.ttl !== undefined ? { ttl: opts.ttl } : undefined),
     },
   } as Context;
 }
@@ -159,7 +158,7 @@ describe('MusicBrainzService', () => {
     fetchMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'Invalid mbid.'));
     const ctx = createMockContext({ tenantId: 'test' });
     await expect(makeService().lookup('artist', 'zero', { inc: [] }, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

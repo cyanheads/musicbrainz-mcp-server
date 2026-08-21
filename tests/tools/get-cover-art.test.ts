@@ -32,7 +32,7 @@ describe('get_cover_art', () => {
         },
       ],
     });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getCoverArtTool.errors });
     const input = getCoverArtTool.input.parse({ mbid: 'rel-mbid' });
     const result = await getCoverArtTool.handler(input, ctx);
     expect(result.images).toHaveLength(1);
@@ -46,7 +46,7 @@ describe('get_cover_art', () => {
 
   it('returns an empty set with a notice when no art exists', async () => {
     getImagesMock.mockResolvedValueOnce({ images: [] });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getCoverArtTool.errors });
     const input = getCoverArtTool.input.parse({ mbid: 'no-art' });
     const result = await getCoverArtTool.handler(input, ctx);
     expect(result.images).toEqual([]);
@@ -59,14 +59,14 @@ describe('get_cover_art', () => {
       images: [{ id: 1, image: 'u', front: true, back: false, types: [] }],
       release: 'https://mb/release/rep-mbid',
     });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getCoverArtTool.errors });
     const input = getCoverArtTool.input.parse({ mbid: 'rg-mbid', entity_type: 'release-group' });
     const result = await getCoverArtTool.handler(input, ctx);
     expect(result.representativeRelease).toBe('rep-mbid');
   });
 
   it('maps an upstream 400 to ctx.fail("invalid_mbid")', async () => {
-    getImagesMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'bad'));
+    getImagesMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.ValidationError, 'bad'));
     const ctx = createMockContext({ tenantId: 'test', errors: getCoverArtTool.errors });
     const input = getCoverArtTool.input.parse({ mbid: '0' });
     await expect(getCoverArtTool.handler(input, ctx)).rejects.toMatchObject({

@@ -12,7 +12,12 @@
 import { createHash } from 'node:crypto';
 
 import type { Context } from '@cyanheads/mcp-ts-core';
-import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import {
+  JsonRpcErrorCode,
+  McpError,
+  serviceUnavailable,
+  validationError,
+} from '@cyanheads/mcp-ts-core/errors';
 import {
   fetchWithTimeout,
   logger,
@@ -43,7 +48,7 @@ export class CoverArtService {
    * Fetch image metadata for a release or release-group MBID. Returns an empty
    * `{ images: [] }` when the entity has no art (CAA 404) — the absence of art
    * is information, not a failure. A malformed/zero MBID still surfaces as the
-   * upstream 400 (`InvalidParams`); transient 5xx is retried.
+   * upstream 400 (`ValidationError`); transient 5xx is retried.
    */
   async getImages(
     entityType: CoverArtEntityType,
@@ -68,8 +73,7 @@ export class CoverArtService {
     const url = `${this.baseUrl}${path}`;
     const reqCtx = requestContextService.createRequestContext({
       operation: 'CoverArtRequest',
-      requestId: ctx.requestId,
-      ...(ctx.traceId && { traceId: ctx.traceId }),
+      parentContext: ctx,
     });
 
     let result: RawCoverArtResponse;
@@ -78,6 +82,7 @@ export class CoverArtService {
         async () => {
           const response = await fetchWithTimeout(url, this.timeoutMs, reqCtx, {
             headers: { Accept: 'application/json' },
+            expectedStatuses: [404],
             ...(options?.signal && { signal: options.signal }),
           });
           const text = await response.text();
@@ -102,6 +107,8 @@ export class CoverArtService {
       if (error instanceof McpError && error.code === JsonRpcErrorCode.NotFound) {
         ctx.log.debug('Cover Art Archive: no art for entity', { entityType, mbid });
         result = { images: [] };
+      } else if (error instanceof McpError && error.code === JsonRpcErrorCode.InvalidParams) {
+        throw validationError(error.message, error.data, { cause: error });
       } else {
         throw error;
       }
@@ -131,7 +138,7 @@ export function initCoverArtService(): void {
     'Cover Art service initialized.',
     requestContextService.createRequestContext({
       operation: 'CoverArtInit',
-      baseUrl: config.coverArtBaseUrl,
+      additionalContext: { baseUrl: config.coverArtBaseUrl },
     }),
   );
 }

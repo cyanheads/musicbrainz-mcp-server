@@ -45,7 +45,7 @@ describe('lookup_identifier', () => {
         },
       ],
     });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: lookupIdentifierTool.errors });
     const input = lookupIdentifierTool.input.parse({ id_type: 'isrc', value: 'USRC17607839' });
     const { result } = await lookupIdentifierTool.handler(input, ctx);
     expect(result.kind).toBe('recordings');
@@ -60,7 +60,7 @@ describe('lookup_identifier', () => {
       'work-count': 1,
       works: [{ id: 'w1', title: 'Composition' }],
     });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: lookupIdentifierTool.errors });
     const input = lookupIdentifierTool.input.parse({ id_type: 'iswc', value: 'T-010.140.236-1' });
     const { result } = await lookupIdentifierTool.handler(input, ctx);
     expect(result.kind).toBe('works');
@@ -72,7 +72,7 @@ describe('lookup_identifier', () => {
       count: 1,
       releases: [{ id: 'rel1', title: 'Album', score: 100, 'artist-credit': [] }],
     });
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: lookupIdentifierTool.errors });
     const input = lookupIdentifierTool.input.parse({ id_type: 'barcode', value: '075678164125' });
     const { result } = await lookupIdentifierTool.handler(input, ctx);
     expect(result.kind).toBe('releases');

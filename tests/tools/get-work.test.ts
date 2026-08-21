@@ -52,7 +52,7 @@ const fullWork: RawWork = {
 describe('get_work', () => {
   it('maps a full payload, splitting relationships and url-rels', async () => {
     lookupMock.mockResolvedValueOnce(fullWork);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getWorkTool.errors });
     const input = getWorkTool.input.parse({ mbid: fullWork.id });
     const result = await getWorkTool.handler(input, ctx);
 
@@ -73,7 +73,7 @@ describe('get_work', () => {
       id: 'sparse-mbid',
       title: 'Obscure Work',
     } satisfies RawWork);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getWorkTool.errors });
     const input = getWorkTool.input.parse({ mbid: 'sparse-mbid' });
     const result = await getWorkTool.handler(input, ctx);
 
@@ -89,11 +89,13 @@ describe('get_work', () => {
   });
 
   it('maps an upstream 400 to ctx.fail("invalid_mbid")', async () => {
-    lookupMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'Invalid mbid.'));
+    lookupMock.mockRejectedValueOnce(
+      new McpError(JsonRpcErrorCode.ValidationError, 'Invalid mbid.'),
+    );
     const ctx = createMockContext({ tenantId: 'test', errors: getWorkTool.errors });
     const input = getWorkTool.input.parse({ mbid: '0' });
     await expect(getWorkTool.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'invalid_mbid' },
     });
   });
@@ -124,7 +126,7 @@ describe('get_work', () => {
       title: 'Much Recorded',
       relations: recordingRels,
     } satisfies RawWork);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getWorkTool.errors });
     const input = getWorkTool.input.parse({ mbid: 'busy-work' });
     const result = await getWorkTool.handler(input, ctx);
 

@@ -35,7 +35,7 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
   errors: [
     {
       reason: 'invalid_mbid',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The MBID is malformed / all-zeros, or entity_type is not one of the six valid types.',
       recovery:
         'Use a 36-character UUID MBID and a valid entity_type (artist, release-group, release, recording, work, label).',
@@ -70,7 +70,7 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
         { signal: ctx.signal },
       );
     } catch (error: unknown) {
-      if (error instanceof McpError && error.code === JsonRpcErrorCode.InvalidParams) {
+      if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
         throw ctx.fail('invalid_mbid', `Malformed MBID "${params.mbid}".`, {
           ...ctx.recoveryFor('invalid_mbid'),
         });

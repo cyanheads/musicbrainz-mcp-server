@@ -36,7 +36,7 @@ export const getWorkTool = tool('musicbrainz_get_work', {
   errors: [
     {
       reason: 'invalid_mbid',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entity_type=work) to find one from a title.`,
     },

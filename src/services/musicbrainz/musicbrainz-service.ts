@@ -15,7 +15,12 @@
 import { createHash } from 'node:crypto';
 
 import type { Context } from '@cyanheads/mcp-ts-core';
-import { serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import {
+  JsonRpcErrorCode,
+  McpError,
+  serviceUnavailable,
+  validationError,
+} from '@cyanheads/mcp-ts-core/errors';
 import {
   fetchWithTimeout,
   logger,
@@ -171,10 +176,11 @@ export class MusicBrainzService {
   /**
    * Core request pipeline: cache check → rate-limited, retried fetch + parse →
    * cache store. `path` is the full WS/2 path with query string (already
-   * `fmt=json`). A 400 (malformed MBID) maps to `InvalidParams` and a 404 (no
-   * such entity) to `NotFound` via `fetchWithTimeout`'s status table — both
-   * non-transient, so they fail fast without burning retries. A 503 / 5xx / HTML
-   * error page is transient and retried.
+   * `fmt=json`). `fetchWithTimeout` maps upstream HTTP 400 to `InvalidParams`,
+   * but that code is reserved for malformed JSON-RPC parameter shape; this
+   * service reclassifies the upstream domain rejection to `ValidationError`.
+   * A 404 remains `NotFound`. Both fail fast without burning retries; a 503 /
+   * 5xx / HTML error page is transient and retried.
    */
   private async request<T>(path: string, ctx: Context, options?: CallOptions): Promise<T> {
     const key = cacheKey('mb', path);
@@ -189,28 +195,35 @@ export class MusicBrainzService {
     const url = `${this.baseUrl}${path}`;
     const reqCtx = requestContextService.createRequestContext({
       operation: 'MusicBrainzRequest',
-      requestId: ctx.requestId,
-      ...(ctx.traceId && { traceId: ctx.traceId }),
+      parentContext: ctx,
     });
 
-    const result = await withRetry<T>(
-      () =>
-        this.limiter.schedule(async () => {
-          const response = await fetchWithTimeout(url, this.timeoutMs, reqCtx, {
-            headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
-            ...(options?.signal && { signal: options.signal }),
-          });
-          const text = await response.text();
-          return this.parse<T>(text, path);
-        }, options?.signal),
-      {
-        operation: 'musicbrainzRequest',
-        context: reqCtx,
-        baseDelayMs: 1500, // rate-limited tier — 503 carries Retry-After
-        maxRetries: this.maxRetries,
-        ...(options?.signal && { signal: options.signal }),
-      },
-    );
+    let result: T;
+    try {
+      result = await withRetry<T>(
+        () =>
+          this.limiter.schedule(async () => {
+            const response = await fetchWithTimeout(url, this.timeoutMs, reqCtx, {
+              headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
+              ...(options?.signal && { signal: options.signal }),
+            });
+            const text = await response.text();
+            return this.parse<T>(text, path);
+          }, options?.signal),
+        {
+          operation: 'musicbrainzRequest',
+          context: reqCtx,
+          baseDelayMs: 1500, // rate-limited tier — 503 carries Retry-After
+          maxRetries: this.maxRetries,
+          ...(options?.signal && { signal: options.signal }),
+        },
+      );
+    } catch (error: unknown) {
+      if (error instanceof McpError && error.code === JsonRpcErrorCode.InvalidParams) {
+        throw validationError(error.message, error.data, { cause: error });
+      }
+      throw error;
+    }
 
     if (this.cacheTtlSeconds > 0) {
       await ctx.state.set(key, result, { ttl: this.cacheTtlSeconds });
@@ -265,9 +278,11 @@ export function initMusicBrainzService(version: string): void {
     'MusicBrainz service initialized.',
     requestContextService.createRequestContext({
       operation: 'MusicBrainzInit',
-      baseUrl: config.baseUrl,
-      rateLimitRps: config.rateLimitRps,
-      cacheTtlSeconds: config.cacheTtlSeconds,
+      additionalContext: {
+        baseUrl: config.baseUrl,
+        rateLimitRps: config.rateLimitRps,
+        cacheTtlSeconds: config.cacheTtlSeconds,
+      },
     }),
   );
 }

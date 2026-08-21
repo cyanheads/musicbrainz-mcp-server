@@ -123,7 +123,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
   errors: [
     {
       reason: 'invalid_link',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'No link MBID was provided, more than one was provided, or the link MBID is malformed (HTTP 400).',
       recovery:
         'Provide exactly one link MBID (e.g. link.artist) that is a valid parent for the target_type. MBIDs are 36-char UUIDs.',

@@ -15,7 +15,7 @@ import { artistCreditString, formatDuration, normalizeArtistCredits, safeText } 
 
 /**
  * Classify an upstream error from a dedicated ISRC/ISWC endpoint: a malformed
- * identifier returns HTTP 400 (`InvalidParams`); a well-formed-but-unknown one
+ * identifier returns HTTP 400 (`ValidationError`); a well-formed-but-unknown one
  * returns 404 (`NotFound`). Returns the contract reason or `null` (transient
  * failures bubble). Handlers call `ctx.fail(reason, …)` so the reason stays
  * lexically inside the handler for conformance lint.
@@ -24,7 +24,7 @@ function classifyIdentifierError(
   error: unknown,
 ): 'invalid_identifier' | 'identifier_not_found' | null {
   if (!(error instanceof McpError)) return null;
-  if (error.code === JsonRpcErrorCode.InvalidParams) return 'invalid_identifier';
+  if (error.code === JsonRpcErrorCode.ValidationError) return 'invalid_identifier';
   if (error.code === JsonRpcErrorCode.NotFound) return 'identifier_not_found';
   return null;
 }
@@ -77,7 +77,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
     },
     {
       reason: 'invalid_identifier',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The ISRC/ISWC is malformed (the dedicated endpoint returns HTTP 400).',
       recovery:
         'ISRC is 12 chars (e.g. USRC17607839); ISWC is T- then three dot-separated 3-digit groups and a check digit, T-DDD.DDD.DDD-C (e.g. T-010.140.236-1). Verify the format.',
@@ -213,7 +213,10 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
 
   format: (output) => {
     const result = output.result;
-    const lines: string[] = [`## Identifier lookup: ${safeText(result.identifier)}`];
+    const lines: string[] = [
+      `## Identifier lookup: ${safeText(result.identifier)}`,
+      `**Kind:** ${safeText(result.kind)}`,
+    ];
     if (result.kind === 'recordings') {
       lines.push(`**Resolved to ${result.recordings.length} recording(s):**`);
       for (const r of result.recordings) {

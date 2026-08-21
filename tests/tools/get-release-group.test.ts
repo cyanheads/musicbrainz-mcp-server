@@ -42,7 +42,7 @@ const fullReleaseGroup: RawReleaseGroup = {
 describe('get_release_group', () => {
   it('maps a full payload with releases and artist credit', async () => {
     lookupMock.mockResolvedValueOnce(fullReleaseGroup);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getReleaseGroupTool.errors });
     const input = getReleaseGroupTool.input.parse({ mbid: fullReleaseGroup.id });
     const result = await getReleaseGroupTool.handler(input, ctx);
 
@@ -61,7 +61,7 @@ describe('get_release_group', () => {
       id: 'sparse-mbid',
       title: 'Obscure Album',
     } satisfies RawReleaseGroup);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getReleaseGroupTool.errors });
     const input = getReleaseGroupTool.input.parse({ mbid: 'sparse-mbid' });
     const result = await getReleaseGroupTool.handler(input, ctx);
 
@@ -75,11 +75,13 @@ describe('get_release_group', () => {
   });
 
   it('maps an upstream 400 to ctx.fail("invalid_mbid")', async () => {
-    lookupMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'Invalid mbid.'));
+    lookupMock.mockRejectedValueOnce(
+      new McpError(JsonRpcErrorCode.ValidationError, 'Invalid mbid.'),
+    );
     const ctx = createMockContext({ tenantId: 'test', errors: getReleaseGroupTool.errors });
     const input = getReleaseGroupTool.input.parse({ mbid: '0' });
     await expect(getReleaseGroupTool.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'invalid_mbid' },
     });
   });
@@ -108,7 +110,7 @@ describe('get_release_group', () => {
       title: 'Much Reissued',
       releases,
     } satisfies RawReleaseGroup);
-    const ctx = createMockContext({ tenantId: 'test' });
+    const ctx = createMockContext({ tenantId: 'test', errors: getReleaseGroupTool.errors });
     const input = getReleaseGroupTool.input.parse({
       mbid: 'b1392450-e666-3926-a536-22c65f834433',
     });
