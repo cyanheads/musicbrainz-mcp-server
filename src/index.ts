@@ -19,6 +19,15 @@ await createApp({
   tools: allToolDefinitions,
   resources: allResourceDefinitions,
   prompts: [],
+  /**
+   * Stateless is this server's posture, declared here so it holds however the
+   * process is launched rather than depending on a deployment env var. Nothing
+   * here is per-session: no tool gates on `ctx.requestInput`, and the response
+   * cache runs on `ctx.state` (tenant-scoped storage), which is unaffected by
+   * session mode. Dropping the session store lets the process scale
+   * horizontally. `MCP_SESSION_MODE` still overrides when set.
+   */
+  sessionMode: 'stateless',
   instructions:
     "Open music metadata over the live MusicBrainz Web Service v2 and the Cover Art Archive. Entities are addressed by MBID (a UUID); starting from a name, call musicbrainz_search_entities first and chain the MBID into the matching musicbrainz_get_* tool. The get_* tools embed at most one page (25) of any linked list (a discography, a label's releases, a work's recordings) — use musicbrainz_browse_entities for the complete set. musicbrainz_lookup_identifier resolves an ISRC/ISWC/barcode without a name search. The server is rate-limited to ~1 request/second against MusicBrainz, so batch enumeration via browse paces accordingly. External IDs (Wikidata QID, Discogs) arrive as url-rels chainable to those servers.",
   setup(core) {
