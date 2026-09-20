@@ -3,26 +3,16 @@
  * and the Cover Art Archive. Lazy-parsed from environment variables; framework
  * config (transport, logging, auth) is owned by @cyanheads/mcp-ts-core and never
  * merged here.
+ *
+ * `parseEnvConfig` normalizes a blank value and a whole-value `${…}` placeholder
+ * — what an MCPB or plugin host forwards for an option the user left empty — to
+ * "unset", so every field below falls through to its default in those cases
+ * without a per-field guard.
  * @module config/server-config
  */
 
 import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
-
-/**
- * Treats an unset env var (`undefined`), a set-but-empty env var (`""`), and an
- * unsubstituted MCPB placeholder (`${user_config.X}`) identically as "not set".
- * Without this, `MUSICBRAINZ_CONTACT=` would surface as a present-but-empty
- * contact instead of falling through to the schema default; the placeholder case
- * occurs when a Claude Desktop / MCPB host leaves an optional `user_config` field
- * blank and passes the literal `${user_config.X}` string through to the process.
- */
-const PLACEHOLDER_PATTERN = /^\$\{[^}]+\}$/;
-const emptyAsUndefined = (v: unknown) => {
-  if (v === '') return;
-  if (typeof v === 'string' && PLACEHOLDER_PATTERN.test(v)) return;
-  return v;
-};
 
 const ServerConfigSchema = z.object({
   /**
@@ -32,7 +22,7 @@ const ServerConfigSchema = z.object({
    * the box; operators running a hosted instance should set their own.
    */
   contact: z
-    .preprocess(emptyAsUndefined, z.string())
+    .string()
     .default('https://github.com/cyanheads/musicbrainz-mcp-server')
     .describe('Contact (email or URL) embedded in the mandatory MusicBrainz User-Agent'),
   baseUrl: z
