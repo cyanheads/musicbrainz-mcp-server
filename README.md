@@ -31,49 +31,64 @@
 
 ---
 
-## Tools
+## Overview
 
-Ten read-only tools mapping the three MusicBrainz access modes — **search** when you have text, **lookup** (`get_*` and `lookup_identifier`) when you hold an MBID or standard identifier, and **browse** when you need the complete linked set beyond the single page that lookup folds in:
+Open music metadata over the live MusicBrainz Web Service v2 and the Cover Art Archive. Search by name, look up entities by MBID or a standard identifier (ISRC/ISWC/barcode), browse the complete linked set beyond what the lookup tools embed, and fetch cover art from any MCP client. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+
+### Tools
 
 | Tool | Description |
 |:---|:---|
-| `musicbrainz_search_entities` | Full-text Lucene search across an entity type (artist, release-group, release, recording, work, label). Returns ranked matches with MBID and a 0–100 relevance score. The first step when starting from a name. |
-| `musicbrainz_get_artist` | Artist profile by MBID — type, country, life span, aliases, tags/genres, discography (release-groups), band-membership relationships, and external links. |
-| `musicbrainz_get_release_group` | Release-group ("the album" above specific pressings) by MBID — primary/secondary type, first-release date, artist credit, editions, and a cover-art availability flag. |
-| `musicbrainz_get_release` | One edition's full detail by MBID — tracklist (media → tracks → recordings), label + catalog number, barcode, packaging, and a cover-art stub. |
-| `musicbrainz_get_recording` | Recording (a specific performance/track) by MBID — length, artist credits, ISRCs, the releases it appears on, the work(s) it performs, and performance/production relationships. |
-| `musicbrainz_get_work` | Work (a composition, distinct from any recording) by MBID — type, languages, ISWCs, writer/composer relationships, and the recordings that perform it. |
-| `musicbrainz_get_label` | Label by MBID — type, country, life span, label code, area, aliases, tags, and external links. |
-| `musicbrainz_lookup_identifier` | Resolve a standard identifier without a name search — ISRC → recordings, ISWC → works, barcode → releases. Output is discriminated on the resolved entity type. |
-| `musicbrainz_browse_entities` | Paginate the complete set of entities linked to a parent MBID — every release on a label, every release-group by an artist, every recording of a work. The only complete-enumeration path. |
-| `musicbrainz_get_cover_art` | Cover Art Archive images for a release or release-group MBID — front/back flags, image types, full-resolution URLs, and 250/500/1200px thumbnails. No art returns an empty set, not an error. |
+| `musicbrainz_search_entities` | Full-text Lucene search across a MusicBrainz entity type. Returns ranked matches with MBID and a relevance score. |
+| `musicbrainz_get_artist` | Artist profile by MBID — type, life span, discography, relationships, external links. |
+| `musicbrainz_get_release_group` | Release-group ("the album" above specific pressings) by MBID — type, first-release date, editions, cover-art flag. |
+| `musicbrainz_get_release` | One edition's full detail by MBID — tracklist, label, catalog number, barcode, packaging. |
+| `musicbrainz_get_recording` | Recording (a specific performance) by MBID — length, ISRCs, releases it appears on, performance relationships. |
+| `musicbrainz_get_work` | Work (a composition) by MBID — type, ISWCs, writer relationships, performing recordings. |
+| `musicbrainz_get_label` | Label by MBID — type, life span, label code, external links. |
+| `musicbrainz_lookup_identifier` | Resolve an ISRC, ISWC, or barcode directly to recordings, works, or releases. |
+| `musicbrainz_browse_entities` | Paginate the complete set of entities linked to a parent MBID — the only complete-enumeration path. |
+| `musicbrainz_get_cover_art` | Cover Art Archive images for a release or release-group MBID. |
 
-### `musicbrainz_search_entities`
+### Resources
 
-Resolve a name to an MBID with full-text Lucene search.
+| Resource | Description |
+|:---|:---|
+| `musicbrainz://{entity_type}/{mbid}` | A single MusicBrainz entity by type and MBID, with default linked sub-resources folded in. |
+
+All entity data is also reachable via the `get_*` tools, so tool-only clients lose nothing. There is no resource `list()` — the corpus is millions of entities; discovery is via `musicbrainz_search_entities`.
+
+## Capability reference
+
+### `musicbrainz_search_entities` <sub>tool</sub>
 
 - Searches one entity type per call: artist, release-group, release, recording, work, or label
 - Field-scoped Lucene syntax (e.g. `artist:radiohead AND country:GB`)
 - Surfaces the raw 0–100 relevance `score` per hit (100 = exact); results stay in MusicBrainz score-descending order, not re-ranked
 - Type-specific fields appear only for the relevant entity (ISRCs on recordings, ISWCs on works, artist credit on release-groups/releases/recordings)
-- Pagination via `limit` (1–100) and `offset`; echoes the effective query and the true upstream total
+- Pagination via `limit` (1–100, default 25) and `offset`; echoes the effective query and the true upstream total
 
 ---
 
-### `musicbrainz_get_artist`
-
-The 80% artist-detail call.
+### `musicbrainz_get_artist` <sub>tool</sub>
 
 - Folds discography (release-groups), band-membership / collaboration relationships, aliases, and tags/genres into one request via `inc`
 - External links (Wikidata QID, Discogs, official site) surface as `url-rels` — chainable to `wikidata-mcp-server` and friends; this server does not chase them itself
-- `inc_release_groups` and `inc_relationships` toggle the expensive sub-resources
+- `inc_release_groups` and `inc_relationships` (both default `true`) toggle the expensive sub-resources
 - Discography and relationships are capped at one page (25); for a prolific artist's complete release-group list, use `musicbrainz_browse_entities` (`target_type=release-group`, artist link)
 
 ---
 
-### `musicbrainz_get_release`
+### `musicbrainz_get_release_group` <sub>tool</sub>
 
-One edition's full detail, the level with an actual tracklist.
+- Primary type (Album, Single, EP, Broadcast, Other) and secondary types (Live, Compilation, Soundtrack, …), first-release date, and the artist credit (array plus a display string)
+- Embedded releases (editions) capped at one page (25); `musicbrainz_browse_entities` (`target_type=release`, `link.release-group`) gives the complete set
+- Carries a cover-art availability flag from the WS/2 payload — call `musicbrainz_get_cover_art` for the actual image URLs
+- Chain a listed release MBID into `musicbrainz_get_release` for its tracklist
+
+---
+
+### `musicbrainz_get_release` <sub>tool</sub>
 
 - Tracklist as media → tracks → recordings, each with length and recording MBID (lengths rendered `m:ss`, stored as milliseconds upstream)
 - Label + catalog number, barcode, country, release date, format, packaging, and text representation (language/script)
@@ -81,56 +96,66 @@ One edition's full detail, the level with an actual tracklist.
 
 ---
 
-### `musicbrainz_lookup_identifier`
+### `musicbrainz_get_recording` <sub>tool</sub>
 
-The deterministic path when you already hold a standard identifier — no name search.
+- Length (rendered `m:ss`), ISRCs, artist credits, and the releases it appears on
+- `inc_relationships` (default `true`) toggles performance/production relationships (performer, producer, engineer — each with role and credited-artist MBID) and work-rels linking to the underlying composition
+- External links (url-rels) surface alongside relationships when included
+
+---
+
+### `musicbrainz_get_work` <sub>tool</sub>
+
+- Type, ISWCs, lyrics languages, aliases, and tags/genres
+- `inc_relationships` (default `true`) toggles writer/composer/lyricist relationships, recording-rels (the recordings that perform it), and external links
+- Recording relationships are returned in full — the work lookup is the one `get_*` tool with no per-page cap
+
+---
+
+### `musicbrainz_get_label` <sub>tool</sub>
+
+- Type, country, life span, label code (the LC number), area, aliases, tags, and external links
+- Releases are NOT embedded — a major label can have tens of thousands; enumerate them with `musicbrainz_browse_entities` (`target_type=release`, `link.label`)
+
+---
+
+### `musicbrainz_lookup_identifier` <sub>tool</sub>
 
 - `id_type=isrc` → recordings (a recording-level code, often shared by several recordings)
 - `id_type=iswc` → works (a composition-level code)
 - `id_type=barcode` → releases (UPC/EAN)
 - ISRC and ISWC hit dedicated exact endpoints; barcode is a Lucene search filter, so its results are ranked (exact match scores 100)
-- The output `kind` field tells you which entity type came back
+- The output `kind` field discriminates which entity type came back (recordings | works | releases)
 
 ---
 
-### `musicbrainz_browse_entities`
-
-The complete-enumeration path — a correctness tool, not just convenience.
+### `musicbrainz_browse_entities` <sub>tool</sub>
 
 - Paginates the full linked set: every release-group by an artist, every release on a label, every recording of a work, every release in a release-group
-- Pages arbitrarily deep via `offset`; `totalCount` is the true upstream total
+- Page size `limit` (1–100, default 25); pages arbitrarily deep via `offset`, and `totalCount` is the true upstream total
 - Use it whenever a linked set may exceed a page — the `get_*` tools embed at most one page (25), and a partial list read as complete is a silent correctness gap
 - Provide exactly one `link` MBID matching a valid parent→child relationship for the `target_type`
 
 ---
 
-### `musicbrainz_get_cover_art`
-
-Cover Art Archive images, kept separate from the release record.
+### `musicbrainz_get_cover_art` <sub>tool</sub>
 
 - Front/back flags, image types, full-resolution URLs, and 250/500/1200px thumbnail URLs
 - Returns an empty image set (not an error) when the entity has no art — absence of art is information
-- Art is served at the release level; a release-group MBID resolves to a representative release's art automatically
+- Art is served at the release level; `entity_type` defaults to `release`, and a release-group MBID resolves to a representative release's art automatically
 - Image URLs are linked, never rehosted — image copyright stays with the rights holders (only the MusicBrainz core metadata is CC0)
 
-## Resources
+---
 
-| Type | Name | Description |
-|:---|:---|:---|
-| Resource | `musicbrainz://{entity_type}/{mbid}` | A single MusicBrainz entity by type and MBID, with default linked sub-resources folded in. Mirrors the matching `musicbrainz_get_*` tool. `entity_type` ∈ artist, release-group, release, recording, work, label. |
+### `musicbrainz://{entity_type}/{mbid}` <sub>resource</sub>
 
-All entity data is also reachable via the `get_*` tools, so tool-only clients (the majority) lose nothing. There is no resource `list()` — the corpus is millions of entities; discovery is via `musicbrainz_search_entities`, not resource enumeration.
+- Mirrors the matching `musicbrainz_get_*` tool with the same default `inc` sets, returned as the raw MusicBrainz JSON record
+- `entity_type` ∈ artist, release-group, release, recording, work, label
+- Embedded linked lists are capped at one page, same as the lookup tools — use `musicbrainz_browse_entities` for the complete set
 
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
-
-- Declarative tool and resource definitions — single file per primitive, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Swappable storage backends: `in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
 MusicBrainz-specific:
 
@@ -165,6 +190,8 @@ A public instance is available at `https://musicbrainz.caseyjhand.com/mcp` — n
   }
 }
 ```
+
+### Self-Hosted / Local
 
 Add the following to your MCP client configuration file.
 
@@ -285,11 +312,7 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
 ### Rate limit and User-Agent
 
-MusicBrainz enforces a **~1 request/second** average rate limit per IP across the whole hosted instance and **blocks requests without a descriptive `User-Agent`** that identifies the application and a contact. This server satisfies both: it sends `musicbrainz-mcp-server/<version> (<contact>)` as the `User-Agent` and serializes all upstream calls through a process-wide token-bucket limiter, with response caching to keep repeat lookups off the wire. On a shared or hosted instance every client shares the one limiter, so bulk enumeration via `musicbrainz_browse_entities` paces accordingly. Set `MUSICBRAINZ_CONTACT` to your own email or URL when you deploy.
-
-### Attribution and licensing
-
-MusicBrainz core entity data is released under **CC0** (public-domain dedication) — see the [MusicBrainz license](https://musicbrainz.org/doc/About/Data_License). This server stays on that core metadata and does not fetch annotation text (which carries a different, non-CC0 license). Cover art is served by the [Cover Art Archive](https://coverartarchive.org/), a joint project of MusicBrainz and the Internet Archive; image URLs are linked, never rehosted, and each image's copyright stays with its rights holders. Cite MusicBrainz and the Cover Art Archive in downstream use.
+MusicBrainz blocks requests without a descriptive `User-Agent` identifying the application and a contact. This server sends `musicbrainz-mcp-server/<version> (<contact>)`, where `<contact>` is `MUSICBRAINZ_CONTACT` — set it to your own email or URL when you deploy. Upstream calls serialize through one process-wide limiter, so on a shared or hosted instance every client draws on the same ~1 req/sec budget and bulk enumeration via `musicbrainz_browse_entities` paces accordingly.
 
 ## Running the server
 
@@ -346,9 +369,13 @@ See [`CLAUDE.md`/`AGENTS.md`](./CLAUDE.md) for development guidelines and archit
 - All upstream calls route through the services — never `fetch()` MusicBrainz directly, or you bypass the User-Agent, rate limiter, and cache
 - Wrap external API data: validate raw → normalize to domain type → return output schema; never fabricate missing fields
 
+## Attribution and licensing
+
+MusicBrainz core entity data is released under **CC0** (public-domain dedication) — see the [MusicBrainz license](https://musicbrainz.org/doc/About/Data_License). This server stays on that core metadata and does not fetch annotation text (which carries a different, non-CC0 license). Cover art is served by the [Cover Art Archive](https://coverartarchive.org/), a joint project of MusicBrainz and the Internet Archive; image URLs are linked, never rehosted, and each image's copyright stays with its rights holders. Cite MusicBrainz and the Cover Art Archive in downstream use.
+
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck
