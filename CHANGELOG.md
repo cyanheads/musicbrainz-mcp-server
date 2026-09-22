@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.8](changelog/0.1.x/0.1.8.md) — 2026-09-22
+
+Cover-art availability now resolves through the Cover Art Archive, with typed rejections for blank search queries and malformed barcodes.
+
 ## [0.1.7](changelog/0.1.x/0.1.7.md) — 2026-09-20 · ⚠️ Breaking
 
 Adopt mcp-ts-core ^0.13.6 (InvalidParams argument rejections, recovery hints, error.data URL redaction), declare stateless session mode (#13), and refresh README, plugin metadata, and skill tooling.
