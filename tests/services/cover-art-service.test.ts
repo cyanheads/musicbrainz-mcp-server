@@ -1,6 +1,8 @@
 /**
- * @fileoverview Tests for CoverArtService: 404 → clean empty set, happy-path
- * image parsing, and transient HTML-error handling. `fetchWithTimeout` is mocked.
+ * @fileoverview Tests for CoverArtService: 404 → empty set flagged `found: false`,
+ * happy-path image parsing, 400 reclassification, and the response cache
+ * (storage-safe keys; a cached 404 keeps its `found: false`). `fetchWithTimeout`
+ * is mocked; the real HTTP path is covered in `cover-art-http.test.ts`.
  * @module tests/services/cover-art-service.test
  */
 
@@ -45,11 +47,11 @@ function realStorageContext(tenantId = 'test'): Context {
 afterEach(() => fetchMock.mockReset());
 
 describe('CoverArtService', () => {
-  it('maps a 404 to an empty image set (no art is not an error)', async () => {
+  it('maps a 404 to an empty image set flagged found=false (no art is not an error)', async () => {
     fetchMock.mockRejectedValueOnce(notFound('Not Found'));
     const ctx = createMockContext({ tenantId: 'test' });
     const result = await makeService().getImages('release', 'no-art-mbid', ctx);
-    expect(result).toEqual({ images: [] });
+    expect(result).toEqual({ images: [], found: false });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(Number),
@@ -103,6 +105,20 @@ describe('CoverArtService', () => {
     const first = await service.getImages('release', 'mbid-abc', ctx);
     const second = await service.getImages('release', 'mbid-abc', ctx);
     expect(second).toEqual(first);
+    expect(first.found).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // second served from cache
+  });
+
+  // A cached 404 must stay distinguishable from a 200 on the cache hit, or a
+  // caller that verifies the MBID on a 404 would skip that check for the TTL.
+  it('keeps found=false on a cache hit for a cached 404', async () => {
+    fetchMock.mockRejectedValueOnce(notFound('Not Found'));
+    const ctx = realStorageContext();
+    const service = makeService(3600);
+    const first = await service.getImages('release', 'no-art-mbid', ctx);
+    const second = await service.getImages('release', 'no-art-mbid', ctx);
+    expect(first).toEqual({ images: [], found: false });
+    expect(second).toEqual({ images: [], found: false });
     expect(fetchMock).toHaveBeenCalledTimes(1); // second served from cache
   });
 });

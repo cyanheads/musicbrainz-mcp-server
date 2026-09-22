@@ -180,7 +180,9 @@ export class MusicBrainzService {
    * but that code is reserved for malformed JSON-RPC parameter shape; this
    * service reclassifies the upstream domain rejection to `ValidationError`.
    * A 404 remains `NotFound`. Both fail fast without burning retries; a 503 /
-   * 5xx / HTML error page is transient and retried.
+   * 5xx / HTML error page is transient and retried. `options.timeoutMs` /
+   * `options.maxRetries` tighten the configured per-attempt timeout and retry
+   * count for this call only.
    */
   private async request<T>(path: string, ctx: Context, options?: CallOptions): Promise<T> {
     const key = cacheKey('mb', path);
@@ -197,13 +199,15 @@ export class MusicBrainzService {
       operation: 'MusicBrainzRequest',
       parentContext: ctx,
     });
+    const timeoutMs = Math.min(options?.timeoutMs ?? this.timeoutMs, this.timeoutMs);
+    const maxRetries = Math.min(options?.maxRetries ?? this.maxRetries, this.maxRetries);
 
     let result: T;
     try {
       result = await withRetry<T>(
         () =>
           this.limiter.schedule(async () => {
-            const response = await fetchWithTimeout(url, this.timeoutMs, reqCtx, {
+            const response = await fetchWithTimeout(url, timeoutMs, reqCtx, {
               headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
               ...(options?.signal && { signal: options.signal }),
             });
@@ -214,7 +218,7 @@ export class MusicBrainzService {
           operation: 'musicbrainzRequest',
           context: reqCtx,
           baseDelayMs: 1500, // rate-limited tier — 503 carries Retry-After
-          maxRetries: this.maxRetries,
+          maxRetries,
           ...(options?.signal && { signal: options.signal }),
         },
       );

@@ -10,24 +10,35 @@
 
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createFetchMock, createMockContext } from '@cyanheads/mcp-ts-core/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
 import { RateLimiter } from '@/services/musicbrainz/rate-limiter.js';
 
 const BASE = 'https://mb.test/ws/2';
 
-/** No cache, no retries, fast limiter — a failure surfaces on the first attempt. */
-function makeService() {
+/**
+ * No cache, fast limiter. Defaults to no retries so a failure surfaces on the
+ * first attempt; the per-call-bound tests configure retries/timeout explicitly.
+ */
+function makeService({ timeoutMs = 5000, maxRetries = 0 } = {}) {
   return new MusicBrainzService(
     BASE,
     'test@example.com',
     '0.1.0',
     new RateLimiter(1000),
     0,
-    5000,
-    0,
+    timeoutMs,
+    maxRetries,
   );
+}
+
+/** A fetch that never answers until its signal aborts — a stalled upstream socket. */
+function stalledFetch(): typeof fetch {
+  return ((_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+    })) as typeof fetch;
 }
 
 let http: ReturnType<typeof createFetchMock> | undefined;
@@ -35,6 +46,7 @@ let http: ReturnType<typeof createFetchMock> | undefined;
 afterEach(() => {
   http?.restore();
   http = undefined;
+  vi.unstubAllGlobals();
 });
 
 describe('MusicBrainzService upstream HTTP boundary', () => {
@@ -138,4 +150,41 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
       makeService().lookup('artist', 'abc', { inc: [] }, createMockContext({ tenantId: 't' })),
     ).rejects.toMatchObject({ code: JsonRpcErrorCode.ServiceUnavailable });
   });
+
+  it('honors a per-call maxRetries=0 — a transient 503 is attempted exactly once', async () => {
+    http = createFetchMock([
+      {
+        match: (request) => request.url.startsWith(`${BASE}/release/`),
+        respond: () => new Response('Rate limited', { status: 503 }),
+      },
+    ]);
+    http.install();
+
+    await expect(
+      makeService({ maxRetries: 1 }).lookup(
+        'release',
+        'abc',
+        { inc: [] },
+        createMockContext({ tenantId: 't' }),
+        { maxRetries: 0 },
+      ),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCode.ServiceUnavailable });
+    expect(http.calls).toHaveLength(1);
+  });
+
+  it('honors a per-call timeoutMs tighter than the configured timeout', async () => {
+    vi.stubGlobal('fetch', stalledFetch());
+    const started = Date.now();
+
+    await expect(
+      makeService({ timeoutMs: 30_000 }).lookup(
+        'release',
+        'abc',
+        { inc: [] },
+        createMockContext({ tenantId: 't' }),
+        { timeoutMs: 50 },
+      ),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCode.Timeout });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  }, 2_000);
 });

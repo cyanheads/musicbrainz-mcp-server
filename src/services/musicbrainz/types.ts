@@ -99,9 +99,13 @@ export interface RawArtist {
   'type-id'?: string | null;
 }
 
+/**
+ * A release-group. Unlike a release, the WS/2 payload carries no
+ * `cover-art-archive` stub at this level — cover art comes from the Cover Art
+ * Archive.
+ */
 export interface RawReleaseGroup {
   'artist-credit'?: RawArtistCredit[];
-  'cover-art-archive'?: RawCoverArtStub;
   disambiguation?: string;
   'first-release-date'?: string;
   genres?: RawTag[];
@@ -116,7 +120,7 @@ export interface RawReleaseGroup {
   title?: string;
 }
 
-/** The free `cover-art-archive` stub folded into release / release-group payloads. */
+/** The free `cover-art-archive` stub folded into release payloads (not release-group ones). */
 export interface RawCoverArtStub {
   artwork?: boolean;
   back?: boolean;
@@ -299,7 +303,16 @@ export interface RawCoverArtImage {
   types?: string[];
 }
 
-/** Options threaded through service calls for cancellation. */
+/**
+ * Per-call options threaded through service requests: cancellation, plus bounds a
+ * best-effort secondary lookup uses to cap its cost. Each bound can only tighten
+ * the configured value (`MUSICBRAINZ_TIMEOUT_MS` / `MUSICBRAINZ_MAX_RETRIES`) —
+ * a larger value is ignored.
+ */
 export interface CallOptions {
+  /** Retry attempts for this call on a transient failure (`0` = a single attempt). */
+  maxRetries?: number;
   signal?: AbortSignal;
+  /** Per-attempt HTTP timeout for this call, in milliseconds. */
+  timeoutMs?: number;
 }

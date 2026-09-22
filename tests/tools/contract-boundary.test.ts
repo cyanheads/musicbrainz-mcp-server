@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const getImagesMock = vi.fn();
 const searchMock = vi.fn();
+const lookupMock = vi.fn();
 
 vi.mock('@/services/cover-art/cover-art-service.js', () => ({
   getCoverArtService: () => ({ getImages: getImagesMock }),
@@ -26,7 +27,7 @@ vi.mock('@/services/musicbrainz/musicbrainz-service.js', async () => {
   >('@/services/musicbrainz/musicbrainz-service.js');
   return {
     ...actual,
-    getMusicBrainzService: () => ({ search: searchMock }),
+    getMusicBrainzService: () => ({ search: searchMock, lookup: lookupMock }),
   };
 });
 
@@ -51,6 +52,7 @@ function errorEnvelope(result: Awaited<ReturnType<typeof runToolContract>>) {
 afterEach(() => {
   getImagesMock.mockReset();
   searchMock.mockReset();
+  lookupMock.mockReset();
 });
 
 describe('argument rejection', () => {
@@ -129,6 +131,25 @@ describe('declared contract errors', () => {
     expect(text).toContain('Recovery:');
   });
 
+  it('rejects a whitespace-only search query as blank_query on both surfaces, before the service', async () => {
+    const result = await runToolContract(searchEntitiesTool, {
+      entityType: 'artist',
+      query: ' \t ',
+    });
+
+    expect(result.isError).toBe(true);
+    const envelope = errorEnvelope(result);
+    expect(envelope?.code).toBe(JsonRpcErrorCode.ValidationError);
+    const data = envelope?.data as { reason?: string; recovery?: { hint?: string } };
+    expect(data.reason).toBe('blank_query');
+    expect(data.recovery?.hint).toContain('artist:radiohead');
+
+    const text = firstText(result);
+    expect(text).toContain('(reason blank_query');
+    expect(text).toContain(`Recovery: ${data.recovery?.hint}`);
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
   it('does not leak the upstream request URL onto the client-facing error data', async () => {
     getImagesMock.mockRejectedValueOnce(
       new McpError(JsonRpcErrorCode.ValidationError, 'upstream 400'),
@@ -153,6 +174,7 @@ describe('declared contract errors', () => {
 describe('success envelope parity', () => {
   it('carries the same image data on structuredContent and content[]', async () => {
     getImagesMock.mockResolvedValueOnce({
+      found: true,
       images: [
         {
           id: 7,
@@ -183,7 +205,9 @@ describe('success envelope parity', () => {
   });
 
   it('reports an empty image set as a success with a notice, not an error', async () => {
-    getImagesMock.mockResolvedValueOnce({ images: [] });
+    // Cover Art Archive 404, and the MBID check confirms the release exists.
+    getImagesMock.mockResolvedValueOnce({ found: false, images: [] });
+    lookupMock.mockResolvedValueOnce({ id: 'no-art' });
     const result = await runToolContract(getCoverArtTool, { mbid: 'no-art' });
 
     expect(result.isError).toBeFalsy();
@@ -194,6 +218,26 @@ describe('success envelope parity', () => {
       ?.map((block) => (block.type === 'text' ? block.text : ''))
       .join('\n');
     expect(text).toContain('No cover art');
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed MBID check as a no-art success flagged unconfirmed, on both surfaces', async () => {
+    getImagesMock.mockResolvedValueOnce({ found: false, images: [] });
+    lookupMock.mockRejectedValueOnce(
+      new McpError(JsonRpcErrorCode.ServiceUnavailable, 'MusicBrainz is degraded.'),
+    );
+    const result = await runToolContract(getCoverArtTool, { mbid: 'maybe-real' });
+
+    expect(result.isError).toBeFalsy();
+    const structured = result.structuredContent as { hasArt: boolean; notice: string };
+    expect(structured.hasArt).toBe(false);
+    expect(structured.notice).toContain('could not be confirmed');
+
+    const text = result.content
+      ?.map((block) => (block.type === 'text' ? block.text : ''))
+      .join('\n');
+    expect(text).toContain('could not be confirmed');
+    expect(text).not.toContain('This is not an error');
   });
 
   it('applies schema defaults to omitted optional arguments', async () => {
