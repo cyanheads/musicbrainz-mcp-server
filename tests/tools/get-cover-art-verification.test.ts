@@ -34,6 +34,8 @@ import {
 
 const CAA = 'https://caa.test';
 const WS2 = 'https://mb.test/ws/2';
+/** Origin match, not a prefix check — `startsWith(CAA)` would also match `https://caa.test.evil.com`. */
+const isCaaUrl = (url: string) => new URL(url).origin === new URL(CAA).origin;
 const REAL_NO_ART = 'a1b2c3d4-0000-4000-8000-00000000a0a0';
 const ZERO = '00000000-0000-0000-0000-000000000000';
 const NONEXISTENT = '11111111-1111-4111-8111-111111111111';
@@ -64,7 +66,7 @@ function install(...routes: FetchMockRoute[]) {
 }
 
 const ws2Calls = () => (http?.calls ?? []).filter((c) => c.request.url.startsWith(WS2));
-const caaCalls = () => (http?.calls ?? []).filter((c) => c.request.url.startsWith(CAA));
+const caaCalls = () => (http?.calls ?? []).filter((c) => isCaaUrl(c.request.url));
 
 type ContractResult = Awaited<ReturnType<typeof runToolContract>>;
 const textOf = (r: ContractResult) =>

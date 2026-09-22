@@ -32,6 +32,8 @@ import {
 const CAA = 'https://caa.test';
 const WS2 = 'https://mb.test/ws/2';
 const RG = 'b1392450-e666-3926-a536-22c65f834433';
+/** Origin match, not a prefix check — `startsWith(CAA)` would also match `https://caa.test.evil.com`. */
+const isCaaUrl = (url: string) => new URL(url).origin === new URL(CAA).origin;
 
 function initServices(env: Record<string, string> = {}) {
   vi.stubEnv('MUSICBRAINZ_BASE_URL', WS2);
@@ -77,7 +79,7 @@ function install(...routes: FetchMockRoute[]) {
   return http;
 }
 
-const caaCalls = () => (http?.calls ?? []).filter((c) => c.request.url.startsWith(CAA));
+const caaCalls = () => (http?.calls ?? []).filter((c) => isCaaUrl(c.request.url));
 const ws2Route = (payload: unknown) => ({
   match: (r: Request) => r.url.startsWith(`${WS2}/release-group/${RG}`),
   respond: () => Response.json(payload),
@@ -159,7 +161,7 @@ describe('get_release_group — coverArt from the Cover Art Archive', () => {
     resetCoverArtService();
     initServices({ MUSICBRAINZ_TIMEOUT_MS: '1000' });
     install(ws2Route(rgPayload()), {
-      match: (r) => r.url.startsWith(CAA),
+      match: (r) => isCaaUrl(r.url),
       respond: (request) =>
         new Promise<Response>((_resolve, reject) => {
           request.signal.addEventListener('abort', () => reject(request.signal.reason), {
@@ -256,7 +258,7 @@ describe('get_release_group — coverArt from the Cover Art Archive', () => {
           respond: () => Response.json({ error: 'Invalid mbid.' }, { status: 400 }),
         },
         {
-          match: (r) => r.url.startsWith(CAA),
+          match: (r) => isCaaUrl(r.url),
           // The archive fails too, but only after the WS/2 400 has already thrown.
           respond: () =>
             new Promise<Response>((resolve) =>
