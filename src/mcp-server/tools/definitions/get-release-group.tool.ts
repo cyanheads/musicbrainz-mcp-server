@@ -1,17 +1,24 @@
 /**
  * @fileoverview musicbrainz_get_release_group — release-group ("the album" above
  * specific pressings) by MBID: primary + secondary type, first-release date,
- * artist credit, the list of releases (editions), tags/genres, and whether cover
- * art exists. The embedded releases list is capped at one page by the lookup
+ * artist credit, the list of releases (editions), tags/genres, and cover-art
+ * availability. The embedded releases list is capped at one page by the lookup
  * endpoint — musicbrainz_browse_entities (release by release-group) gives the
  * complete set. Use musicbrainz_get_release for a specific edition's tracklist.
+ *
+ * WS/2 carries no cover-art stub for release-groups (only releases get one), so
+ * availability comes from the Cover Art Archive release-group lookup — the one
+ * musicbrainz_get_cover_art makes — run concurrently with the WS/2 lookup and
+ * bounded, since it is best-effort: when it fails, `coverArt` is omitted and the
+ * notice says so, rather than reporting `exists: false` for art never checked.
  * @module mcp-server/tools/definitions/get-release-group.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { getCoverArtService } from '@/services/cover-art/cover-art-service.js';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
-import type { RawReleaseGroup } from '@/services/musicbrainz/types.js';
+import type { RawCoverArtImage, RawReleaseGroup } from '@/services/musicbrainz/types.js';
 import {
   ArtistCreditSchema,
   artistCreditString,
@@ -19,7 +26,6 @@ import {
   classifyMbidError,
   MBID_EXAMPLE,
   normalizeArtistCredits,
-  normalizeCoverArtStub,
   normalizeTags,
   renderArtistCredits,
   renderCoverArtStub,
@@ -45,10 +51,23 @@ const ReleaseRefSchema = z
 /** One-page cap for the releases (editions) embedded in a release-group lookup. */
 const LOOKUP_PAGE_CAP = 25;
 
+/** Bounds on the best-effort Cover Art Archive lookup: one attempt, a short timeout. */
+const COVER_ART_LOOKUP_BOUNDS = { timeoutMs: 5_000, maxRetries: 0 } as const;
+
+/** Summarize the archive's image index (empty after a 404) into the availability stub. */
+function coverArtFromImages(images: RawCoverArtImage[]): z.infer<typeof CoverArtStubSchema> {
+  return {
+    exists: images.length > 0,
+    count: images.length,
+    front: images.some((image) => image.front === true),
+    back: images.some((image) => image.back === true),
+  };
+}
+
 export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
   title: 'musicbrainz-mcp-server: get release group',
   description:
-    'Release-group ("the album" above specific pressings) by MBID: primary type (Album/Single/EP) and secondary types (Live/Compilation), first-release date, artist credit, the list of releases (editions), tags/genres, and a cover-art availability flag from the WS/2 payload (use musicbrainz_get_cover_art for actual image URLs). The embedded releases list is capped at one page (25); for the complete set of editions, call musicbrainz_browse_entities with target_type=release and link.release-group. For a specific edition\'s tracklist, take a release MBID from the releases list and call musicbrainz_get_release.',
+    'Release-group ("the album" above specific pressings) by MBID: primary type (Album/Single/EP) and secondary types (Live/Compilation), first-release date, artist credit, the list of releases (editions), tags/genres, and cover-art availability from the Cover Art Archive (image count and front/back flags for the release-group\'s representative release — the art musicbrainz_get_cover_art returns; use that tool for the image URLs). The embedded releases list is capped at one page (25); for the complete set of editions, call musicbrainz_browse_entities with target_type=release and link.release-group. For a specific edition\'s tracklist, take a release MBID from the releases list and call musicbrainz_get_release.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -97,8 +116,8 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
         'Releases (editions) in this group (one page; may be empty or capped — use browse for all).',
       ),
     tags: z.array(TagSchema).describe('Community tags/genres (may be empty).'),
-    coverArt: CoverArtStubSchema.describe(
-      'Whether cover art exists (availability stub from WS/2).',
+    coverArt: CoverArtStubSchema.optional().describe(
+      "Cover-art availability from the Cover Art Archive: the images of the release-group's representative release, the same art musicbrainz_get_cover_art returns (exists: false with count 0 when the archive has none). Omitted when the archive lookup could not complete — the notice says so.",
     ),
   }),
 
@@ -120,12 +139,33 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
     notice: z
       .string()
       .optional()
-      .describe('How to fetch the complete list of editions when truncated.'),
+      .describe(
+        'Present when the releases list was capped (how to fetch the complete set of editions) and/or when cover-art availability could not be checked (why coverArt is omitted).',
+      ),
   },
 
   async handler(input, ctx) {
     ctx.log.info('musicbrainz_get_release_group', { mbid: input.mbid });
     const service = getMusicBrainzService();
+
+    // Different host, outside the MusicBrainz rate limiter — start it first so it
+    // overlaps the WS/2 lookup. Settled into a value (undefined on failure) so a
+    // WS/2 error thrown below leaves no rejected promise unobserved.
+    const coverArtPending = getCoverArtService()
+      .getImages('release-group', input.mbid, ctx, {
+        signal: ctx.signal,
+        ...COVER_ART_LOOKUP_BOUNDS,
+      })
+      .then(
+        (lookup) => coverArtFromImages(lookup.images ?? []),
+        (error: unknown) => {
+          ctx.log.warning('Cover Art Archive lookup failed; coverArt omitted', {
+            mbid: input.mbid,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        },
+      );
 
     let raw: RawReleaseGroup;
     try {
@@ -138,8 +178,16 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       );
     } catch (error: unknown) {
       const reason = classifyMbidError(error);
-      if (reason)
-        throw ctx.fail(reason, undefined, { ...ctx.recoveryFor(reason), mbid: input.mbid });
+      if (reason === 'invalid_mbid')
+        throw ctx.fail('invalid_mbid', undefined, {
+          ...ctx.recoveryFor('invalid_mbid'),
+          mbid: input.mbid,
+        });
+      if (reason === 'entity_not_found')
+        throw ctx.fail('entity_not_found', undefined, {
+          ...ctx.recoveryFor('entity_not_found'),
+          mbid: input.mbid,
+        });
       throw error;
     }
 
@@ -153,11 +201,24 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       ...(r.disambiguation ? { disambiguation: r.disambiguation } : {}),
     }));
 
-    if (releases.length >= LOOKUP_PAGE_CAP) {
-      ctx.enrich.truncated({ shown: releases.length, cap: LOOKUP_PAGE_CAP });
-      ctx.enrich.notice(
-        `Releases capped at ${LOOKUP_PAGE_CAP}. Call musicbrainz_browse_entities (target_type=release, link.release-group=${input.mbid}) to enumerate the complete set of editions.`,
-      );
+    const coverArt = await coverArtPending;
+
+    // `notice` is last-wins, so both sources compose into one string.
+    const truncated = releases.length >= LOOKUP_PAGE_CAP;
+    const notice = [
+      truncated
+        ? `Releases capped at ${LOOKUP_PAGE_CAP}. Call musicbrainz_browse_entities (target_type=release, link.release-group=${input.mbid}) to enumerate the complete set of editions.`
+        : undefined,
+      coverArt
+        ? undefined
+        : 'Cover-art availability could not be checked (the Cover Art Archive lookup failed), so coverArt is omitted; call musicbrainz_get_cover_art with entity_type=release-group to retry.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (truncated) {
+      ctx.enrich.truncated({ shown: releases.length, cap: LOOKUP_PAGE_CAP, guidance: notice });
+    } else if (notice) {
+      ctx.enrich.notice(notice);
     }
 
     return {
@@ -171,7 +232,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       artistCreditString: artistCreditString(credits),
       releases,
       tags: normalizeTags(raw.tags ?? raw.genres),
-      coverArt: normalizeCoverArtStub(raw['cover-art-archive']),
+      ...(coverArt ? { coverArt } : {}),
     };
   },
 
@@ -187,7 +248,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       .join(', ');
     if (types) lines.push(`**Type:** ${types}`);
     if (result.firstReleaseDate) lines.push(`**First release:** ${result.firstReleaseDate}`);
-    lines.push(renderCoverArtStub(result.coverArt));
+    if (result.coverArt) lines.push(renderCoverArtStub(result.coverArt));
     const tags = renderTags(result.tags);
     if (tags) lines.push(tags);
     lines.push(...renderArtistCredits(result.artistCredit));
