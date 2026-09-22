@@ -8,6 +8,7 @@
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import {
   getMusicBrainzService,
   MusicBrainzService,
@@ -140,13 +141,23 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
     'Full-text search across a MusicBrainz entity type (artist, release-group, release, recording, work, label) using a Lucene query string. Returns ranked matches with MBID, name/title, disambiguation, type, and a 0–100 relevance score (100 = exact). Starting point when resolving a name to an MBID — chain the returned MBID into the matching musicbrainz_get_* tool. Results are in MusicBrainz score-descending order. Supports field-scoped Lucene syntax (e.g. `artist:radiohead AND country:GB`).',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
+  errors: [
+    {
+      reason: 'blank_query',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The query contains only whitespace (it is blank after trimming).',
+      recovery:
+        'Provide a non-blank query: a name or title (e.g. radiohead) or a field-scoped Lucene query (e.g. artist:radiohead).',
+    },
+  ],
+
   input: z.object({
     entityType: z.enum(ENTITY_TYPES).describe('Which entity type to search.'),
     query: z
       .string()
       .min(1)
       .describe(
-        'Lucene query string. Plain text matches names/titles; field scoping (e.g. `artist:`, `country:`, `tag:`) is supported.',
+        'Lucene query string; must contain non-whitespace text. Plain text matches names/titles; field scoping (e.g. `artist:`, `country:`, `tag:`) is supported. Sent to MusicBrainz exactly as given.',
       ),
     limit: z
       .number()
@@ -179,6 +190,13 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
       entityType: input.entityType,
       query: input.query,
     });
+    // MusicBrainz rejects a blank query with a generic HTTP 400. Trimming is only
+    // for this check — the query goes upstream exactly as the caller sent it.
+    if (input.query.trim().length === 0) {
+      throw ctx.fail('blank_query', 'The search query is blank — it contains only whitespace.', {
+        ...ctx.recoveryFor('blank_query'),
+      });
+    }
     const service = getMusicBrainzService();
     const envelope = await service.search(
       input.entityType,
