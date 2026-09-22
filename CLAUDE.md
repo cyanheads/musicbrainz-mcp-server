@@ -290,7 +290,7 @@ src/
       rate-limiter.ts                   # Process-wide ~1 req/sec token bucket
       types.ts                          # Raw/domain entity types
     cover-art/
-      cover-art-service.ts              # Cover Art Archive client — 404 → empty set, follows 307
+      cover-art-service.ts              # Cover Art Archive client — 404 → empty set (found:false), follows 307
   mcp-server/
     tools/definitions/
       search-entities.tool.ts           # musicbrainz_search_entities (the entry point)

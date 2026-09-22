@@ -41,7 +41,7 @@ Open music metadata over the live MusicBrainz Web Service v2 and the Cover Art A
 |:---|:---|
 | `musicbrainz_search_entities` | Full-text Lucene search across a MusicBrainz entity type. Returns ranked matches with MBID and a relevance score. |
 | `musicbrainz_get_artist` | Artist profile by MBID — type, life span, discography, relationships, external links. |
-| `musicbrainz_get_release_group` | Release-group ("the album" above specific pressings) by MBID — type, first-release date, editions, cover-art flag. |
+| `musicbrainz_get_release_group` | Release-group ("the album" above specific pressings) by MBID — type, first-release date, editions, cover-art availability. |
 | `musicbrainz_get_release` | One edition's full detail by MBID — tracklist, label, catalog number, barcode, packaging. |
 | `musicbrainz_get_recording` | Recording (a specific performance) by MBID — length, ISRCs, releases it appears on, performance relationships. |
 | `musicbrainz_get_work` | Work (a composition) by MBID — type, ISWCs, writer relationships, performing recordings. |
@@ -67,6 +67,7 @@ All entity data is also reachable via the `get_*` tools, so tool-only clients lo
 - Surfaces the raw 0–100 relevance `score` per hit (100 = exact); results stay in MusicBrainz score-descending order, not re-ranked
 - Type-specific fields appear only for the relevant entity (ISRCs on recordings, ISWCs on works, artist credit on release-groups/releases/recordings)
 - Pagination via `limit` (1–100, default 25) and `offset`; echoes the effective query and the true upstream total
+- A whitespace-only query fails locally as `blank_query` with a recovery hint; everything else goes upstream exactly as sent, incidental whitespace included
 
 ---
 
@@ -83,7 +84,7 @@ All entity data is also reachable via the `get_*` tools, so tool-only clients lo
 
 - Primary type (Album, Single, EP, Broadcast, Other) and secondary types (Live, Compilation, Soundtrack, …), first-release date, and the artist credit (array plus a display string)
 - Embedded releases (editions) capped at one page (25); `musicbrainz_browse_entities` (`target_type=release`, `link.release-group`) gives the complete set
-- Carries a cover-art availability flag from the WS/2 payload — call `musicbrainz_get_cover_art` for the actual image URLs
+- Cover-art availability (image count, front/back) comes from the Cover Art Archive — the art `musicbrainz_get_cover_art` returns for the same MBID — looked up alongside the MusicBrainz record; when that lookup fails the field is omitted with a notice rather than reported as "no art"
 - Chain a listed release MBID into `musicbrainz_get_release` for its tracklist
 
 ---
@@ -123,7 +124,7 @@ All entity data is also reachable via the `get_*` tools, so tool-only clients lo
 
 - `id_type=isrc` → recordings (a recording-level code, often shared by several recordings)
 - `id_type=iswc` → works (a composition-level code)
-- `id_type=barcode` → releases (UPC/EAN)
+- `id_type=barcode` → releases (UPC/EAN digits; spaces and hyphens are ignored, anything else is rejected as `invalid_identifier`)
 - ISRC and ISWC hit dedicated exact endpoints; barcode is a Lucene search filter, so its results are ranked (exact match scores 100)
 - The output `kind` field discriminates which entity type came back (recordings | works | releases)
 
@@ -142,6 +143,7 @@ All entity data is also reachable via the `get_*` tools, so tool-only clients lo
 
 - Front/back flags, image types, full-resolution URLs, and 250/500/1200px thumbnail URLs
 - Returns an empty image set (not an error) when the entity has no art — absence of art is information
+- The archive answers the same 404 for "no art" and for an MBID it has no record of, so that case is checked against MusicBrainz first: a malformed or all-zeros MBID fails as `invalid_mbid`, one matching no release/release-group as `entity_not_found`, and an unreachable check returns the empty set with its existence flagged unconfirmed
 - Art is served at the release level; `entity_type` defaults to `release`, and a release-group MBID resolves to a representative release's art automatically
 - Image URLs are linked, never rehosted — image copyright stays with the rights holders (only the MusicBrainz core metadata is CC0)
 
@@ -354,7 +356,7 @@ The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `
 | `src/index.ts` | `createApp()` entry point — registers tools and the resource, inits both services. |
 | `src/config` | Server-specific environment variable parsing and validation with Zod. |
 | `src/services/musicbrainz` | MusicBrainz WS/2 client — User-Agent, rate limiter, response cache, retry, and domain types. |
-| `src/services/cover-art` | Cover Art Archive client — maps 404 to an empty image set, follows the release-group redirect. |
+| `src/services/cover-art` | Cover Art Archive client — maps 404 to an empty image set flagged as not found, follows the release-group redirect. |
 | `src/mcp-server/tools` | Tool definitions (`*.tool.ts`). Ten read-only tools across search, lookup, browse, and cover art. |
 | `src/mcp-server/resources` | Resource definitions. The `musicbrainz://{entity_type}/{mbid}` entity mirror. |
 | `tests/` | Unit and integration tests mirroring `src/`. |
