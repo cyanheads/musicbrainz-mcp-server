@@ -17,8 +17,9 @@ import { artistCreditString, formatDuration, normalizeArtistCredits, safeText } 
  * Classify an upstream error from a dedicated ISRC/ISWC endpoint: a malformed
  * identifier returns HTTP 400 (`ValidationError`); a well-formed-but-unknown one
  * returns 404 (`NotFound`). Returns the contract reason or `null` (transient
- * failures bubble). Handlers call `ctx.fail(reason, …)` so the reason stays
- * lexically inside the handler for conformance lint.
+ * failures bubble). The handler branches on the result and throws
+ * `ctx.fail('<literal reason>', …)` per branch, so the error-contract lint rules
+ * can read which reasons it throws.
  */
 function classifyIdentifierError(
   error: unknown,
@@ -64,7 +65,7 @@ const ReleaseHitSchema = z
 export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
   title: 'musicbrainz-mcp-server: lookup identifier',
   description:
-    'Resolve a standard identifier to MusicBrainz entities without a name search — the deterministic path when you already hold an ID. id_type=isrc → recordings (a recording-level code, often shared by several recordings); id_type=iswc → works (a composition-level code); id_type=barcode → releases (UPC/EAN). ISRC and ISWC hit dedicated exact endpoints; barcode is a Lucene search filter so results are ranked (exact match scores 100). The output kind field tells you which entity type came back.',
+    'Resolve a standard identifier to MusicBrainz entities without a name search — the deterministic path when you already hold an ID. id_type=isrc → recordings (a recording-level code, often shared by several recordings); id_type=iswc → works (a composition-level code); id_type=barcode → releases (UPC/EAN digits; spaces and hyphens are ignored). ISRC and ISWC hit dedicated exact endpoints; barcode is a Lucene search filter so results are ranked (exact match scores 100). The output kind field tells you which entity type came back.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -78,9 +79,9 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
     {
       reason: 'invalid_identifier',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The ISRC/ISWC is malformed (the dedicated endpoint returns HTTP 400).',
+      when: 'The ISRC/ISWC is malformed (the dedicated endpoint returns HTTP 400), or the barcode contains anything other than digits once spaces and hyphens are removed.',
       recovery:
-        'ISRC is 12 chars (e.g. USRC17607839); ISWC is T- then three dot-separated 3-digit groups and a check digit, T-DDD.DDD.DDD-C (e.g. T-010.140.236-1). Verify the format.',
+        'ISRC is 12 chars (e.g. USRC17607839); ISWC is T- then three dot-separated 3-digit groups and a check digit, T-DDD.DDD.DDD-C (e.g. T-010.140.236-1); a barcode is the UPC/EAN digits only (e.g. 075678164125 — spaces and hyphens are ignored, wildcards are not accepted). Verify the format.',
     },
   ],
 
@@ -92,7 +93,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       .string()
       .min(1)
       .describe(
-        'The identifier value. ISRC e.g. "USRC17607839"; ISWC e.g. "T-010.140.236-1"; barcode e.g. "075678164125".',
+        'The identifier value. ISRC e.g. "USRC17607839"; ISWC e.g. "T-010.140.236-1"; barcode = the UPC/EAN digits, e.g. "075678164125" (spaces and hyphens are ignored; any other character, including a wildcard, is rejected).',
       ),
   }),
 
@@ -119,7 +120,9 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
         z
           .object({
             kind: z.literal('releases').describe('Barcode resolved to releases.'),
-            identifier: z.string().describe('The looked-up identifier value.'),
+            identifier: z
+              .string()
+              .describe('The barcode digits that were searched (spaces and hyphens removed).'),
             releases: z
               .array(ReleaseHitSchema)
               .describe('Releases carrying this barcode (ranked).'),
@@ -139,10 +142,20 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
         envelope = await service.resolveIsrc(input.value, ctx, { signal: ctx.signal });
       } catch (error: unknown) {
         const reason = classifyIdentifierError(error);
-        if (reason)
-          throw ctx.fail(reason, `Identifier "${input.value}" — ${reason}.`, {
-            ...ctx.recoveryFor(reason),
-          });
+        if (reason === 'invalid_identifier')
+          throw ctx.fail(
+            'invalid_identifier',
+            `Identifier "${input.value}" — invalid_identifier.`,
+            {
+              ...ctx.recoveryFor('invalid_identifier'),
+            },
+          );
+        if (reason === 'identifier_not_found')
+          throw ctx.fail(
+            'identifier_not_found',
+            `Identifier "${input.value}" — identifier_not_found.`,
+            { ...ctx.recoveryFor('identifier_not_found') },
+          );
         throw error;
       }
       const recordings = (envelope.recordings ?? []).map((r) => {
@@ -168,10 +181,20 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
         envelope = await service.resolveIswc(input.value, ctx, { signal: ctx.signal });
       } catch (error: unknown) {
         const reason = classifyIdentifierError(error);
-        if (reason)
-          throw ctx.fail(reason, `Identifier "${input.value}" — ${reason}.`, {
-            ...ctx.recoveryFor(reason),
-          });
+        if (reason === 'invalid_identifier')
+          throw ctx.fail(
+            'invalid_identifier',
+            `Identifier "${input.value}" — invalid_identifier.`,
+            {
+              ...ctx.recoveryFor('invalid_identifier'),
+            },
+          );
+        if (reason === 'identifier_not_found')
+          throw ctx.fail(
+            'identifier_not_found',
+            `Identifier "${input.value}" — identifier_not_found.`,
+            { ...ctx.recoveryFor('identifier_not_found') },
+          );
         throw error;
       }
       const works = (envelope.works ?? []).map((w) => ({
@@ -188,9 +211,20 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
     }
 
     // barcode — Lucene search filter on releases (ranked, not a dedicated endpoint).
+    // The value is interpolated into a Lucene query, so it must be pure digits:
+    // anything else (`*`, `OR`, a field clause) would widen the search instead of
+    // identifying a release. Printed barcodes group digits with spaces or hyphens.
+    const barcode = input.value.replace(/[\s-]+/g, '');
+    if (!/^\d+$/.test(barcode)) {
+      throw ctx.fail(
+        'invalid_identifier',
+        `Barcode "${input.value}" is not a UPC/EAN — expected digits only (spaces and hyphens are ignored).`,
+        { ...ctx.recoveryFor('invalid_identifier') },
+      );
+    }
     const envelope = await service.search(
       'release',
-      `barcode:${input.value}`,
+      `barcode:${barcode}`,
       { limit: 25, offset: 0 },
       ctx,
       { signal: ctx.signal },
@@ -204,11 +238,11 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       score: typeof r.score === 'number' ? r.score : 0,
     }));
     if (releases.length === 0) {
-      throw ctx.fail('identifier_not_found', `No release carries barcode ${input.value}.`, {
+      throw ctx.fail('identifier_not_found', `No release carries barcode ${barcode}.`, {
         ...ctx.recoveryFor('identifier_not_found'),
       });
     }
-    return { result: { kind: 'releases' as const, identifier: input.value, releases } };
+    return { result: { kind: 'releases' as const, identifier: barcode, releases } };
   },
 
   format: (output) => {
