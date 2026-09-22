@@ -159,8 +159,16 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       );
     } catch (error: unknown) {
       const reason = classifyMbidError(error);
-      if (reason)
-        throw ctx.fail(reason, undefined, { ...ctx.recoveryFor(reason), mbid: input.mbid });
+      if (reason === 'invalid_mbid')
+        throw ctx.fail('invalid_mbid', undefined, {
+          ...ctx.recoveryFor('invalid_mbid'),
+          mbid: input.mbid,
+        });
+      if (reason === 'entity_not_found')
+        throw ctx.fail('entity_not_found', undefined, {
+          ...ctx.recoveryFor('entity_not_found'),
+          mbid: input.mbid,
+        });
       throw error;
     }
 

@@ -30,8 +30,9 @@ import type {
  * split: a malformed / all-zeros MBID returns HTTP 400 (`ValidationError`); a
  * well-formed MBID with no matching entity returns HTTP 404 (`NotFound`). Returns
  * the contract reason for those two cases, or `null` for anything else (transient
- * upstream failures bubble unchanged). Handlers call `ctx.fail(reason, …)` on a
- * non-null result so `data.reason` is populated and typed against their contract.
+ * upstream failures bubble unchanged). Handlers branch on the result and throw
+ * `ctx.fail('<literal reason>', …)` per branch: the error-contract lint rules skip
+ * any definition whose `ctx.fail` / `ctx.recoveryFor` takes a non-literal reason.
  */
 export function classifyMbidError(error: unknown): 'invalid_mbid' | 'entity_not_found' | null {
   if (!(error instanceof McpError)) return null;
@@ -158,7 +159,7 @@ export const CoverArtStubSchema = z
       .describe('Whether a designated back image exists. Omitted when unknown.'),
   })
   .describe(
-    'Cover-art availability stub from the WS/2 payload — use musicbrainz_get_cover_art for image URLs.',
+    'Cover-art availability summary (each tool states its source: the WS/2 release record for releases, the Cover Art Archive for release-groups) — use musicbrainz_get_cover_art for image URLs.',
   );
 
 // ─── Pure normalizers (raw upstream → domain, absence-preserving) ─────────────
