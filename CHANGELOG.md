@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.9](changelog/0.1.x/0.1.9.md) — 2026-10-08
+
+Moves to mcp-ts-core 0.13.14: error results drop stack traces, request context, and root causes and carry a request id, more mis-typed arguments are repaired before validation, and the Docker image installs dependencies in a build-platform stage.
+
 ## [0.1.8](changelog/0.1.x/0.1.8.md) — 2026-09-22
 
 Cover-art availability now resolves through the Cover Art Archive, with typed rejections for blank search queries and malformed barcodes.
