@@ -217,7 +217,6 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       throw ctx.fail(
         'invalid_link',
         `Provide exactly one link MBID — received ${linkEntries.length}.`,
-        { ...ctx.recoveryFor('invalid_link') },
       );
     }
     const [linkType, linkMbid] = first;
@@ -233,14 +232,10 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     } catch (error: unknown) {
       const reason = classifyMbidError(error);
       if (reason === 'invalid_mbid') {
-        throw ctx.fail('invalid_link', `Malformed link MBID "${linkMbid}".`, {
-          ...ctx.recoveryFor('invalid_link'),
-        });
+        throw ctx.fail('invalid_link', `Malformed link MBID "${linkMbid}".`);
       }
       if (reason === 'entity_not_found') {
-        throw ctx.fail('entity_not_found', `No ${linkType} exists with MBID ${linkMbid}.`, {
-          ...ctx.recoveryFor('entity_not_found'),
-        });
+        throw ctx.fail('entity_not_found', `No ${linkType} exists with MBID ${linkMbid}.`);
       }
       throw error;
     }

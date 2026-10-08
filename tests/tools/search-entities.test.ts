@@ -7,7 +7,7 @@
  */
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const searchMock = vi.fn();
@@ -126,10 +126,11 @@ describe('search_entities — blank query', () => {
         status: 400,
       }),
     );
-    const ctx = createMockContext({ tenantId: 'test', errors: searchEntitiesTool.errors });
-    const input = searchEntitiesTool.input.parse({ entityType: 'artist', query });
+    // runToolContract applies the framework's fill of the declared recovery hint.
+    const result = await runToolContract(searchEntitiesTool, { entityType: 'artist', query });
 
-    await expect(searchEntitiesTool.handler(input, ctx)).rejects.toMatchObject({
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as { error?: unknown }).error).toMatchObject({
       code: JsonRpcErrorCode.ValidationError,
       data: {
         reason: 'blank_query',

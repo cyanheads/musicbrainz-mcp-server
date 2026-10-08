@@ -32,7 +32,7 @@ import type {
  * the contract reason for those two cases, or `null` for anything else (transient
  * upstream failures bubble unchanged). Handlers branch on the result and throw
  * `ctx.fail('<literal reason>', …)` per branch: the error-contract lint rules skip
- * any definition whose `ctx.fail` / `ctx.recoveryFor` takes a non-literal reason.
+ * any definition whose `ctx.fail` takes a non-literal reason.
  */
 export function classifyMbidError(error: unknown): 'invalid_mbid' | 'entity_not_found' | null {
   if (!(error instanceof McpError)) return null;

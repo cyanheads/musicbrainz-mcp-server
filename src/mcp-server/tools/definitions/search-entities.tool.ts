@@ -193,9 +193,7 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
     // MusicBrainz rejects a blank query with a generic HTTP 400. Trimming is only
     // for this check — the query goes upstream exactly as the caller sent it.
     if (input.query.trim().length === 0) {
-      throw ctx.fail('blank_query', 'The search query is blank — it contains only whitespace.', {
-        ...ctx.recoveryFor('blank_query'),
-      });
+      throw ctx.fail('blank_query', 'The search query is blank — it contains only whitespace.');
     }
     const service = getMusicBrainzService();
     const envelope = await service.search(

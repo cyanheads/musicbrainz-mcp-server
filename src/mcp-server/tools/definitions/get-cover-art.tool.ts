@@ -115,10 +115,7 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
       // A 404 is mapped to `found: false` inside the service; a 400 (MBID not a
       // UUID) surfaces here as ValidationError.
       if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
-        throw ctx.fail('invalid_mbid', undefined, {
-          ...ctx.recoveryFor('invalid_mbid'),
-          mbid: input.mbid,
-        });
+        throw ctx.fail('invalid_mbid', undefined, { mbid: input.mbid });
       }
       throw error;
     }
@@ -135,15 +132,12 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
       } catch (error: unknown) {
         const reason = classifyMbidError(error);
         if (reason === 'invalid_mbid')
-          throw ctx.fail('invalid_mbid', undefined, {
-            ...ctx.recoveryFor('invalid_mbid'),
-            mbid: input.mbid,
-          });
+          throw ctx.fail('invalid_mbid', undefined, { mbid: input.mbid });
         if (reason === 'entity_not_found')
           throw ctx.fail(
             'entity_not_found',
             `No ${input.entity_type} exists with MBID ${input.mbid}.`,
-            { ...ctx.recoveryFor('entity_not_found'), mbid: input.mbid },
+            { mbid: input.mbid },
           );
         // Best-effort: an upstream fault (5xx, timeout, rate limit) leaves the
         // no-art answer standing, flagged unconfirmed. Anything else is a bug.

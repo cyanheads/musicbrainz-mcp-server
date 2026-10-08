@@ -39,7 +39,7 @@ export const getLabelTool = tool('musicbrainz_get_label', {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
-      recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entity_type=label) to find one from a name.`,
+      recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entityType=label) to find one from a name.`,
     },
     {
       reason: 'entity_not_found',
@@ -92,15 +92,9 @@ export const getLabelTool = tool('musicbrainz_get_label', {
     } catch (error: unknown) {
       const reason = classifyMbidError(error);
       if (reason === 'invalid_mbid')
-        throw ctx.fail('invalid_mbid', undefined, {
-          ...ctx.recoveryFor('invalid_mbid'),
-          mbid: input.mbid,
-        });
+        throw ctx.fail('invalid_mbid', undefined, { mbid: input.mbid });
       if (reason === 'entity_not_found')
-        throw ctx.fail('entity_not_found', undefined, {
-          ...ctx.recoveryFor('entity_not_found'),
-          mbid: input.mbid,
-        });
+        throw ctx.fail('entity_not_found', undefined, { mbid: input.mbid });
       throw error;
     }
 

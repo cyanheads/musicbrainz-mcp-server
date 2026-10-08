@@ -71,17 +71,12 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
       );
     } catch (error: unknown) {
       if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
-        throw ctx.fail('invalid_mbid', `Malformed MBID "${params.mbid}".`, {
-          ...ctx.recoveryFor('invalid_mbid'),
-        });
+        throw ctx.fail('invalid_mbid', `Malformed MBID "${params.mbid}".`);
       }
       if (error instanceof McpError && error.code === JsonRpcErrorCode.NotFound) {
         throw ctx.fail(
           'entity_not_found',
           `No ${params.entity_type} exists with MBID ${params.mbid}.`,
-          {
-            ...ctx.recoveryFor('entity_not_found'),
-          },
         );
       }
       throw error;

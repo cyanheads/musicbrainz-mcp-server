@@ -121,10 +121,11 @@ describe('lookup_identifier — barcode validation', () => {
   ])('rejects %s with invalid_identifier before any search', async (_label, value) => {
     // What the barcode search answers today for Lucene syntax: a broad ranked hit list.
     searchMock.mockResolvedValue({ count: 1, releases: [releaseHit] });
-    const ctx = createMockContext({ tenantId: 'test', errors: lookupIdentifierTool.errors });
-    const input = lookupIdentifierTool.input.parse({ id_type: 'barcode', value });
+    // runToolContract applies the framework's fill of the declared recovery hint.
+    const result = await runToolContract(lookupIdentifierTool, { id_type: 'barcode', value });
 
-    await expect(lookupIdentifierTool.handler(input, ctx)).rejects.toMatchObject({
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as { error?: unknown }).error).toMatchObject({
       code: JsonRpcErrorCode.ValidationError,
       data: {
         reason: 'invalid_identifier',

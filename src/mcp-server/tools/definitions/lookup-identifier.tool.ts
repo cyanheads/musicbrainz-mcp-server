@@ -143,18 +143,11 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       } catch (error: unknown) {
         const reason = classifyIdentifierError(error);
         if (reason === 'invalid_identifier')
-          throw ctx.fail(
-            'invalid_identifier',
-            `Identifier "${input.value}" — invalid_identifier.`,
-            {
-              ...ctx.recoveryFor('invalid_identifier'),
-            },
-          );
+          throw ctx.fail('invalid_identifier', `Identifier "${input.value}" — invalid_identifier.`);
         if (reason === 'identifier_not_found')
           throw ctx.fail(
             'identifier_not_found',
             `Identifier "${input.value}" — identifier_not_found.`,
-            { ...ctx.recoveryFor('identifier_not_found') },
           );
         throw error;
       }
@@ -168,9 +161,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
         };
       });
       if (recordings.length === 0) {
-        throw ctx.fail('identifier_not_found', `No recording carries ISRC ${input.value}.`, {
-          ...ctx.recoveryFor('identifier_not_found'),
-        });
+        throw ctx.fail('identifier_not_found', `No recording carries ISRC ${input.value}.`);
       }
       return { result: { kind: 'recordings' as const, identifier: input.value, recordings } };
     }
@@ -182,18 +173,11 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       } catch (error: unknown) {
         const reason = classifyIdentifierError(error);
         if (reason === 'invalid_identifier')
-          throw ctx.fail(
-            'invalid_identifier',
-            `Identifier "${input.value}" — invalid_identifier.`,
-            {
-              ...ctx.recoveryFor('invalid_identifier'),
-            },
-          );
+          throw ctx.fail('invalid_identifier', `Identifier "${input.value}" — invalid_identifier.`);
         if (reason === 'identifier_not_found')
           throw ctx.fail(
             'identifier_not_found',
             `Identifier "${input.value}" — identifier_not_found.`,
-            { ...ctx.recoveryFor('identifier_not_found') },
           );
         throw error;
       }
@@ -203,9 +187,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
         ...(w.type ? { type: w.type } : {}),
       }));
       if (works.length === 0) {
-        throw ctx.fail('identifier_not_found', `No work carries ISWC ${input.value}.`, {
-          ...ctx.recoveryFor('identifier_not_found'),
-        });
+        throw ctx.fail('identifier_not_found', `No work carries ISWC ${input.value}.`);
       }
       return { result: { kind: 'works' as const, identifier: input.value, works } };
     }
@@ -219,7 +201,6 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       throw ctx.fail(
         'invalid_identifier',
         `Barcode "${input.value}" is not a UPC/EAN — expected digits only (spaces and hyphens are ignored).`,
-        { ...ctx.recoveryFor('invalid_identifier') },
       );
     }
     const envelope = await service.search(
@@ -238,9 +219,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       score: typeof r.score === 'number' ? r.score : 0,
     }));
     if (releases.length === 0) {
-      throw ctx.fail('identifier_not_found', `No release carries barcode ${barcode}.`, {
-        ...ctx.recoveryFor('identifier_not_found'),
-      });
+      throw ctx.fail('identifier_not_found', `No release carries barcode ${barcode}.`);
     }
     return { result: { kind: 'releases' as const, identifier: barcode, releases } };
   },
