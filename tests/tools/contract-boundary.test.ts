@@ -56,8 +56,10 @@ afterEach(() => {
 });
 
 describe('argument rejection', () => {
+  // A boolean, not an integer: the framework repairs an integer sent for a string
+  // into its digits before validation, so only a boolean stays a wrong type.
   it('rejects a wrong-typed argument as InvalidParams, not ValidationError', async () => {
-    const result = await runToolContract(getCoverArtTool, { mbid: 123 } as never);
+    const result = await runToolContract(getCoverArtTool, { mbid: true } as never);
 
     expect(result.isError).toBe(true);
     // -32602. An argument rejection never reaches the handler, so it is a
@@ -68,7 +70,7 @@ describe('argument rejection', () => {
   });
 
   it('carries reason "invalid_arguments" and a schema-derived recovery hint', async () => {
-    const result = await runToolContract(getCoverArtTool, { mbid: 123 } as never);
+    const result = await runToolContract(getCoverArtTool, { mbid: true } as never);
     const data = errorEnvelope(result)?.data as {
       reason?: string;
       recovery?: { hint?: string };
@@ -81,7 +83,7 @@ describe('argument rejection', () => {
   });
 
   it('mirrors the recovery hint and the reason into the content[] text', async () => {
-    const text = firstText(await runToolContract(getCoverArtTool, { mbid: 123 } as never));
+    const text = firstText(await runToolContract(getCoverArtTool, { mbid: true } as never));
 
     expect(text).toContain('mbid');
     expect(text).toContain('Recovery:');
