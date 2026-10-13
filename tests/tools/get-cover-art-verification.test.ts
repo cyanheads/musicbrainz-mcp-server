@@ -3,12 +3,11 @@
  * tested at the HTTP seam: only `globalThis.fetch` is faked, so the real
  * CoverArtService (404 → `found: false`, cache), the real MusicBrainzService
  * (400/404 classification, per-call retry/timeout bounds), and the handler's
- * mapping all run. The archive answers 404 alike for a real entity with no art,
- * the all-zeros sentinel, and an MBID matching no entity; the WS/2 lookup of the
- * same entity type splits them (400 → invalid_mbid, 404 → entity_not_found,
- * 200 → the genuine no-art success). A failed verification never turns no-art
- * into an error — it downgrades the notice to "existence unconfirmed". Caller
- * cancellation is propagated as RequestCancelled rather than degraded success.
+ * mapping all run. Malformed/all-zero MBIDs fail before fetch. For a well-shaped
+ * MBID the archive answers 404 alike for a real entity with no art and one
+ * matching no entity; WS/2 splits those (404 → entity_not_found, 200 → no art).
+ * An upstream verification fault downgrades the notice to "existence unconfirmed".
+ * Caller cancellation propagates as RequestCancelled rather than degraded success.
  * @module tests/tools/get-cover-art-verification.test
  */
 

@@ -27,9 +27,9 @@ import type {
 } from '@/services/musicbrainz/types.js';
 
 /**
- * Classify an upstream error from an MBID lookup against the MusicBrainz 400-vs-404
- * split: a malformed / all-zeros MBID returns HTTP 400 (`ValidationError`); a
- * well-formed MBID with no matching entity returns HTTP 404 (`NotFound`). Returns
+ * Classify a service error from an MBID lookup: local malformed/all-zero rejection
+ * and upstream HTTP 400 become `ValidationError`; a well-formed MBID with no
+ * matching entity returns HTTP 404 (`NotFound`). Returns
  * the contract reason for those two cases, or `null` for anything else (transient
  * upstream failures bubble unchanged). Handlers branch on the result and throw
  * `ctx.fail('<literal reason>', …)` per branch: the error-contract lint rules skip

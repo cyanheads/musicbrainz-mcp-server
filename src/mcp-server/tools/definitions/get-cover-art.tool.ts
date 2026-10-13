@@ -2,10 +2,10 @@
  * @fileoverview musicbrainz_get_cover_art — Cover Art Archive images for a release
  * or release-group MBID: front/back flags, image types, full-resolution URLs, and
  * 250/500/1200px thumbnails. Returns an empty image set (not an error) when the
- * entity has no art. The archive answers HTTP 404 alike for a real entity with no
- * art, the all-zeros MBID, and an MBID matching no entity, so on a 404 the handler
- * checks the MBID with a bounded MusicBrainz lookup of the same entity type
- * before reporting "no art". Separate from musicbrainz_get_release so art is
+ * entity has no art. Malformed/all-zero MBIDs fail before fetch. For a well-shaped
+ * MBID an archive 404 means no art or no entity, so the handler checks it with a
+ * bounded MusicBrainz lookup of the same entity type before reporting "no art".
+ * Separate from musicbrainz_get_release so art is
  * fetchable without the full record.
  * @module mcp-server/tools/definitions/get-cover-art.tool
  */
@@ -114,16 +114,20 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
         signal: ctx.signal,
       });
     } catch (error: unknown) {
-      // A 404 is mapped to `found: false` inside the service; a 400 (MBID not a
-      // UUID) surfaces here as ValidationError.
+      /**
+       * The service maps 404 to `found: false`; local MBID rejection and
+       * upstream 400 both surface as ValidationError.
+       */
       if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
         throw ctx.fail('invalid_mbid', undefined, { mbid: input.mbid });
       }
       throw error;
     }
 
-    // A 404 cannot tell "no art" from "no such entity" — ask MusicBrainz, which
-    // answers 400 for the all-zeros sentinel, 404 for an unknown MBID, 200 otherwise.
+    /**
+     * A CAA 404 cannot tell "no art" from "no such entity" — MusicBrainz
+     * answers 404 for an unknown MBID and 200 for an existing entity.
+     */
     let existenceConfirmed = true;
     if (!raw.found) {
       try {

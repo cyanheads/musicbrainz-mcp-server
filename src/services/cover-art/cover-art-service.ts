@@ -61,8 +61,8 @@ export class CoverArtService {
   /**
    * Fetch image metadata for a release or release-group MBID. A CAA 404 returns
    * `{ images: [], found: false }` — the absence of art is information, not a
-   * failure. A syntactically invalid MBID surfaces as the upstream 400
-   * (`ValidationError`); transient 5xx is retried. `options.timeoutMs` /
+   * failure. Malformed/all-zero MBIDs fail before fetch; upstream 400 responses
+   * also become `ValidationError`. Transient 5xx is retried. `options.timeoutMs` /
    * `options.maxRetries` tighten the configured timeout and retry count for this
    * call only.
    */
