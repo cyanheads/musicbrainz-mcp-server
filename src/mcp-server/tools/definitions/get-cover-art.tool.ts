@@ -14,7 +14,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { type CoverArtLookup, getCoverArtService } from '@/services/cover-art/cover-art-service.js';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
-import { classifyMbidError, MBID_EXAMPLE, safeText } from './_shared.js';
+import { classifyMbidError, MBID_EXAMPLE, MbidInput, safeText, safeUrl } from './_shared.js';
 
 /**
  * Bounds on the MBID check made after a Cover Art Archive 404: one attempt, a
@@ -61,7 +61,7 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
     {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The MBID is malformed or the all-zeros sentinel — a value MusicBrainz rejects outright (HTTP 400).',
+      when: 'The MBID is malformed or the all-zeros sentinel (rejected before fetch), or an upstream rejects it with HTTP 400.',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities to find a release or release-group MBID.`,
     },
     {
@@ -74,7 +74,9 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
   ],
 
   input: z.object({
-    mbid: z.string().describe('Release or release-group MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Release or release-group MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
     entity_type: z
       .enum(['release', 'release-group'])
       .default('release')
@@ -130,6 +132,7 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
           ...VERIFY_LOOKUP_BOUNDS,
         });
       } catch (error: unknown) {
+        ctx.signal.throwIfAborted();
         const reason = classifyMbidError(error);
         if (reason === 'invalid_mbid')
           throw ctx.fail('invalid_mbid', undefined, { mbid: input.mbid });
@@ -178,7 +181,7 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
     const representativeRelease = raw.release?.split('/').filter(Boolean).pop();
 
     return {
-      mbid: input.mbid,
+      mbid: input.mbid.trim().toLowerCase(),
       entityType: input.entity_type,
       ...(input.entity_type === 'release-group' && representativeRelease
         ? { representativeRelease }
@@ -204,10 +207,10 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
           .filter(Boolean)
           .join(', ');
         lines.push(`\n### Image ${safeText(img.id)}${flags ? ` (${flags})` : ''}`);
-        lines.push(`**Full:** ${safeText(img.imageUrl)}`);
-        if (img.thumbnail250) lines.push(`**250px:** ${safeText(img.thumbnail250)}`);
-        if (img.thumbnail500) lines.push(`**500px:** ${safeText(img.thumbnail500)}`);
-        if (img.thumbnail1200) lines.push(`**1200px:** ${safeText(img.thumbnail1200)}`);
+        lines.push(`**Full:** ${safeUrl(img.imageUrl)}`);
+        if (img.thumbnail250) lines.push(`**250px:** ${safeUrl(img.thumbnail250)}`);
+        if (img.thumbnail500) lines.push(`**500px:** ${safeUrl(img.thumbnail500)}`);
+        if (img.thumbnail1200) lines.push(`**1200px:** ${safeUrl(img.thumbnail1200)}`);
         if (typeof img.approved === 'boolean')
           lines.push(`**Approved:** ${img.approved ? 'yes' : 'no'}`);
         if (img.comment) lines.push(`**Comment:** ${safeText(img.comment)}`);

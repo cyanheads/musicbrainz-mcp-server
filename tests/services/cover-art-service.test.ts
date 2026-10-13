@@ -47,10 +47,24 @@ function realStorageContext(tenantId = 'test'): Context {
 afterEach(() => fetchMock.mockReset());
 
 describe('CoverArtService', () => {
+  it.each(['not-a-uuid', '00000000-0000-0000-0000-000000000000'])(
+    'rejects %s before CAA fetch',
+    async (mbid) => {
+      fetchMock.mockResolvedValueOnce({ text: async () => '{"images":[]}' });
+      await expect(
+        makeService().getImages('release', mbid, createMockContext()),
+      ).rejects.toMatchObject({ code: JsonRpcErrorCode.ValidationError });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
   it('maps a 404 to an empty image set flagged found=false (no art is not an error)', async () => {
     fetchMock.mockRejectedValueOnce(notFound('Not Found'));
     const ctx = createMockContext({ tenantId: 'test' });
-    const result = await makeService().getImages('release', 'no-art-mbid', ctx);
+    const result = await makeService().getImages(
+      'release',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      ctx,
+    );
     expect(result).toEqual({ images: [], found: false });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(String),
@@ -78,19 +92,26 @@ describe('CoverArtService', () => {
         }),
     } as Response);
     const ctx = createMockContext({ tenantId: 'test' });
-    const result = await makeService().getImages('release-group', 'rg-mbid', ctx);
+    const result = await makeService().getImages(
+      'release-group',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      ctx,
+    );
     expect(result.images?.[0]?.front).toBe(true);
     expect(result.images?.[0]?.thumbnails?.['250']).toBe('https://caa.test/250.jpg');
     expect(result.release).toContain('rep-mbid');
   });
 
-  it('rethrows a non-404 error (e.g. malformed MBID 400)', async () => {
+  it('reclassifies an upstream 400 as ValidationError', async () => {
     const { McpError } = await import('@cyanheads/mcp-ts-core/errors');
     fetchMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'bad'));
     const ctx = createMockContext({ tenantId: 'test' });
-    await expect(makeService().getImages('release', 'bad', ctx)).rejects.toMatchObject({
+    await expect(
+      makeService().getImages('release', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', ctx),
+    ).rejects.toMatchObject({
       code: JsonRpcErrorCode.ValidationError,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   // Regression: the cache key must satisfy the storage key allowlist. Caching an
@@ -102,8 +123,8 @@ describe('CoverArtService', () => {
     } as Response);
     const ctx = realStorageContext();
     const service = makeService(3600);
-    const first = await service.getImages('release', 'mbid-abc', ctx);
-    const second = await service.getImages('release', 'mbid-abc', ctx);
+    const first = await service.getImages('release', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', ctx);
+    const second = await service.getImages('release', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', ctx);
     expect(second).toEqual(first);
     expect(first.found).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1); // second served from cache
@@ -115,8 +136,8 @@ describe('CoverArtService', () => {
     fetchMock.mockRejectedValueOnce(notFound('Not Found'));
     const ctx = realStorageContext();
     const service = makeService(3600);
-    const first = await service.getImages('release', 'no-art-mbid', ctx);
-    const second = await service.getImages('release', 'no-art-mbid', ctx);
+    const first = await service.getImages('release', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', ctx);
+    const second = await service.getImages('release', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', ctx);
     expect(first).toEqual({ images: [], found: false });
     expect(second).toEqual({ images: [], found: false });
     expect(fetchMock).toHaveBeenCalledTimes(1); // second served from cache

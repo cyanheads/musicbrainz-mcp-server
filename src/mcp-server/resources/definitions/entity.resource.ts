@@ -10,8 +10,10 @@
 
 import { resource, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { MbidInput } from '@/mcp-server/tools/definitions/_shared.js';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
-import type { EntityType } from '@/services/musicbrainz/types.js';
+import type { EntityType, RawRelation } from '@/services/musicbrainz/types.js';
+import { sliceWorkRelations } from '@/services/musicbrainz/work-relations.js';
 
 /** Default `inc` sets per entity type — the useful slice the get_* tools fetch. */
 const DEFAULT_INC: Record<EntityType, string[]> = {
@@ -29,7 +31,7 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
   name: 'musicbrainz-entity',
   title: 'musicbrainz-mcp-server: entity',
   description:
-    "A single MusicBrainz entity by type and MBID, with default linked sub-resources folded in (mirrors the matching musicbrainz_get_* tool). entity_type ∈ artist, release-group, release, recording, work, label. Returns the raw MusicBrainz JSON record. For complete linked sets (a prolific artist's discography, a label's releases) use musicbrainz_browse_entities — embedded lists here are capped at one page.",
+    'A MusicBrainz entity by type and MBID with default linked data. entity_type: artist, release-group, release, recording, work, label. Artist release-groups and release-group editions embed one upstream page; labels embed no releases. Work recording relationships are sliced to 25 with recordingRelationshipSummary inside the JSON (exact relationship total and actual truncation). All other relationships and release tracklists are preserved. Browse recording by work enumerates identities; musicbrainz_get_recording supplies work relationship attributes and dates.',
   mimeType: 'application/json',
 
   errors: [
@@ -52,7 +54,9 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
     entity_type: z
       .enum(ENTITY_TYPES)
       .describe('Entity type: artist, release-group, release, recording, work, or label.'),
-    mbid: z.string().describe('Entity MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Entity MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
   }),
 
   async handler(params, ctx) {
@@ -62,13 +66,16 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
     });
     const service = getMusicBrainzService();
     try {
-      return await service.lookup<Record<string, unknown>>(
+      const raw = await service.lookup<Record<string, unknown>>(
         params.entity_type,
         params.mbid,
         { inc: DEFAULT_INC[params.entity_type] },
         ctx,
         { signal: ctx.signal },
       );
+      if (params.entity_type !== 'work') return raw;
+      const slice = sliceWorkRelations(raw.relations as RawRelation[] | undefined, String(raw.id));
+      return { ...raw, relations: slice.relations, recordingRelationshipSummary: slice.summary };
     } catch (error: unknown) {
       if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
         throw ctx.fail('invalid_mbid', `Malformed MBID "${params.mbid}".`);

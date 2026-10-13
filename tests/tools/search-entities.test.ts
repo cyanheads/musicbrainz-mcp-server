@@ -34,6 +34,33 @@ const { searchEntitiesTool } = await import(
 afterEach(() => searchMock.mockReset());
 
 describe('search_entities', () => {
+  it.each([
+    ['release', { status: 'Official' }, { status: 'Official' }],
+    ['release', {}, {}],
+    ['release-group', { 'primary-type': 'Album' }, { type: 'Album' }],
+    ['artist', { type: 'Group' }, { type: 'Group' }],
+    ['label', { type: 'Imprint' }, { type: 'Imprint' }],
+    ['work', { type: 'Song' }, { type: 'Song' }],
+  ] as const)('preserves status/subtype semantics for %s', async (entityType, fields, expected) => {
+    const key = {
+      release: 'releases',
+      'release-group': 'release-groups',
+      artist: 'artists',
+      label: 'labels',
+      work: 'works',
+    }[entityType];
+    searchMock.mockResolvedValueOnce({
+      count: 1,
+      [key]: [{ id: 'id', name: 'Name', title: 'Title', score: 100, ...fields }],
+    });
+    const result = await runToolContract(searchEntitiesTool, { entityType, query: 'name' });
+    const row = (result.structuredContent as { results: object[] }).results[0];
+    expect(row).toMatchObject(expected);
+    if (entityType === 'release') expect(row).not.toHaveProperty('type');
+    if (!Object.hasOwn(fields, 'status')) expect(row).not.toHaveProperty('status');
+    for (const value of Object.values(expected))
+      expect(JSON.stringify(result.content)).toContain(value);
+  });
   it('surfaces the raw upstream score and maps artist hits', async () => {
     searchMock.mockResolvedValueOnce({
       count: 1,

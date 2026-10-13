@@ -25,6 +25,7 @@ import {
   CoverArtStubSchema,
   classifyMbidError,
   MBID_EXAMPLE,
+  MbidInput,
   normalizeArtistCredits,
   normalizeTags,
   renderArtistCredits,
@@ -74,7 +75,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
     {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
+      when: 'The MBID is malformed or the all-zeros sentinel (rejected before fetch), or MusicBrainz rejects it with HTTP 400.',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entityType=release-group) to find one from a title.`,
     },
     {
@@ -87,7 +88,9 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
   ],
 
   input: z.object({
-    mbid: z.string().describe('Release-group MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Release-group MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
   }),
 
   output: z.object({

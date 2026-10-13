@@ -12,7 +12,14 @@
 export type EntityType = 'artist' | 'release-group' | 'release' | 'recording' | 'work' | 'label';
 
 /** Parent link types for the browse endpoint (one parent MBID per browse call). */
-export type BrowseLink = 'artist' | 'label' | 'release-group' | 'recording' | 'work' | 'area';
+export type BrowseLink =
+  | 'artist'
+  | 'label'
+  | 'release-group'
+  | 'release'
+  | 'recording'
+  | 'work'
+  | 'area';
 
 // ─── Shared raw sub-shapes ───────────────────────────────────────────────────
 

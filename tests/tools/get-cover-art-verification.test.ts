@@ -7,7 +7,8 @@
  * the all-zeros sentinel, and an MBID matching no entity; the WS/2 lookup of the
  * same entity type splits them (400 → invalid_mbid, 404 → entity_not_found,
  * 200 → the genuine no-art success). A failed verification never turns no-art
- * into an error — it downgrades the notice to "existence unconfirmed".
+ * into an error — it downgrades the notice to "existence unconfirmed". Caller
+ * cancellation is propagated as RequestCancelled rather than degraded success.
  * @module tests/tools/get-cover-art-verification.test
  */
 
@@ -94,7 +95,39 @@ afterEach(() => {
 });
 
 describe('get_cover_art — Cover Art Archive 404 is verified against MusicBrainz', () => {
-  it('all-zeros MBID: CAA 404 + WS/2 400 → invalid_mbid on both surfaces', async () => {
+  it('caller cancellation during verification remains a cancellation on both surfaces', async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const verifying = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    install(
+      { match: `${CAA}/release/${REAL_NO_ART}`, respond: caa404 },
+      {
+        match: (r) => r.url.startsWith(WS2),
+        respond: (request) =>
+          new Promise<Response>((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => reject(request.signal.reason), {
+              once: true,
+            });
+            started();
+          }),
+      },
+    );
+    const pending = runToolContract(
+      getCoverArtTool,
+      { mbid: REAL_NO_ART },
+      { context: { signal: controller.signal } },
+    );
+    await verifying;
+    controller.abort();
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(errorOf(result)?.code).toBe(JsonRpcErrorCode.RequestCancelled);
+    expect(textOf(result)).toMatch(/cancel|abort/i);
+    expect(ws2Calls()).toHaveLength(1);
+  });
+  it('all-zeros MBID: invalid_mbid on both surfaces without upstream requests', async () => {
     install(
       { match: `${CAA}/release/${ZERO}`, respond: caa404 },
       {
@@ -110,7 +143,8 @@ describe('get_cover_art — Cover Art Archive 404 is verified against MusicBrain
     expect(error?.data?.reason).toBe('invalid_mbid');
     expect(error?.data?.recovery?.hint).toContain('36-character UUID');
     expect(textOf(result)).toContain('(reason invalid_mbid');
-    expect(ws2Calls()).toHaveLength(1);
+    expect(ws2Calls()).toHaveLength(0);
+    expect(caaCalls()).toHaveLength(0);
   });
 
   it('well-formed MBID matching no entity: CAA 404 + WS/2 404 → entity_not_found on both surfaces', async () => {
@@ -301,14 +335,15 @@ describe('get_cover_art — no verification when the archive answers', () => {
     expect(ws2Calls()).toHaveLength(0);
   });
 
-  it('CAA 400 (not a UUID) → invalid_mbid, no WS/2 call', async () => {
+  it('CAA 400 → invalid_mbid, no WS/2 call', async () => {
     install({
-      match: `${CAA}/release/not-a-uuid`,
+      match: `${CAA}/release/${REAL_NO_ART}`,
       respond: () => new Response('bad', { status: 400 }),
     });
-    const result = await runToolContract(getCoverArtTool, { mbid: 'not-a-uuid' });
+    const result = await runToolContract(getCoverArtTool, { mbid: REAL_NO_ART });
 
     expect(errorOf(result)?.data?.reason).toBe('invalid_mbid');
+    expect(caaCalls()).toHaveLength(1);
     expect(ws2Calls()).toHaveLength(0);
   });
 });

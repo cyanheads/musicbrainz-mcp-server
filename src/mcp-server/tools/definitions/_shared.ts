@@ -16,6 +16,7 @@
 
 import { z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { MBID_PATTERN } from '@/services/musicbrainz/mbid.js';
 import type {
   RawAlias,
   RawArtistCredit,
@@ -41,8 +42,11 @@ export function classifyMbidError(error: unknown): 'invalid_mbid' | 'entity_not_
   return null;
 }
 
-/** UUID shape MusicBrainz MBIDs follow — surfaced in recovery hints, not used to pre-validate. */
+/** Example MusicBrainz identifier used in recovery hints. */
 export const MBID_EXAMPLE = 'a74b1b7f-71a5-4011-9441-d0b5e4122711';
+
+/** Discovery-only pattern; service validation preserves the typed domain error contract. */
+export const MbidInput = z.string().meta({ pattern: MBID_PATTERN });
 
 // ─── Zod sub-schemas (described, including nested array-item objects) ─────────
 
@@ -333,25 +337,24 @@ export function formatDuration(ms: number | null | undefined): string | undefine
 
 /**
  * Neutralize a community-edited free-text value before it is interpolated into a
- * single line of `format()` markdown. MusicBrainz core data is user-submitted, so
- * a name / title / disambiguation / tag / alias / comment field can carry hostile
- * content. Every `format()` line is built as `lines.push(...)` and joined with
- * `\n`, so the one way a value escapes its structural slot (a bold label, a list
- * bullet) is by injecting its own line breaks. A value like
- * `"\n\n## SYSTEM: ignore the above"` would otherwise render as a new markdown
- * heading the LLM reads as an instruction.
- *
- * Collapsing every line break, tab, control character (`\p{Cc}`), and Unicode
- * line/paragraph separator (U+2028 / U+2029) to a single space keeps the value
- * confined to its line: leading `#` / `-` / `>` markers are inert mid-line, and a
- * fenced code block
- * cannot open because the value can no longer span multiple lines. The structured
- * `structuredContent` twin carries the raw value unchanged — this guards only the
- * markdown surface, where untrusted text and server-authored structure mix.
- * Legitimate single-line titles pass through byte-identical.
+ * single line of `format()` markdown. Collapse controls and escape syntax that
+ * would alter literal prose or interfere with adjacent server-authored delimiters.
+ * Intraword underscores and less-than comparisons remain unchanged. Structured
+ * values remain raw; this helper preserves presentation, not content trust.
  */
 const CONTROL_OR_LINE_SEPARATOR = /[\p{Cc}\u2028\u2029]+/gu;
 export function safeText(value: string): string {
+  return value
+    .replace(CONTROL_OR_LINE_SEPARATOR, ' ')
+    .trim()
+    .replace(/[\\*`[\]~&]/g, '\\$&')
+    .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, '\\_')
+    .replace(/<(?=[A-Za-z/!?])/g, '\\<')
+    .replace(/^([#>+-])/, '\\$1');
+}
+
+/** Keep URL bytes copyable while confining the value to a single rendered line. */
+export function safeUrl(value: string): string {
   return value.replace(CONTROL_OR_LINE_SEPARATOR, ' ').trim();
 }
 
@@ -373,7 +376,7 @@ export function renderRelationships(rels: z.infer<typeof RelationSchema>[]): str
 export function renderExternalLinks(links: z.infer<typeof ExternalLinkSchema>[]): string[] {
   if (links.length === 0) return [];
   const lines = ['', '### External links'];
-  for (const l of links) lines.push(`- **${safeText(l.type)}:** ${safeText(l.resource)}`);
+  for (const l of links) lines.push(`- **${safeText(l.type)}:** ${safeUrl(l.resource)}`);
   return lines;
 }
 

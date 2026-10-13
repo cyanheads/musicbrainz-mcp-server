@@ -2,14 +2,14 @@
  * @fileoverview Tests for the get_work tool handler: full payload, sparse
  * payload (omitted upstream fields preserved as absent), error-contract mapping
  * (invalid_mbid / entity_not_found), and the regression lock that the work
- * lookup returns recording relationships unbounded — no false truncation signal
- * even when many recording-rels are present. The MusicBrainz service is mocked
+ * lookup retains at most 25 recording relationships with exact totals and
+ * truthful truncation disclosure. The MusicBrainz service is mocked
  * at the accessor boundary.
  * @module tests/tools/get-work.test
  */
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RawRelation, RawWork } from '@/services/musicbrainz/types.js';
 
@@ -21,6 +21,7 @@ vi.mock('@/services/musicbrainz/musicbrainz-service.js', () => ({
 }));
 
 const { getWorkTool } = await import('@/mcp-server/tools/definitions/get-work.tool.js');
+const { entityResource } = await import('@/mcp-server/resources/definitions/entity.resource.js');
 
 afterEach(() => lookupMock.mockReset());
 
@@ -50,6 +51,53 @@ const fullWork: RawWork = {
 };
 
 describe('get_work', () => {
+  it('keeps resource and tool slices independent of cached raw data and call order', async () => {
+    const recordings = Array.from(
+      { length: 26 },
+      (_, i): RawRelation => ({
+        'target-type': 'recording',
+        type: 'performance',
+        recording: { id: `r${i}`, title: `R${i}` },
+      }),
+    );
+    const raw = {
+      ...fullWork,
+      relations: [fullWork.relations![0]!, ...recordings, fullWork.relations![2]!],
+    };
+    lookupMock.mockResolvedValue(raw);
+    const resource = () =>
+      entityResource.handler(
+        entityResource.params!.parse({ entity_type: 'work', mbid: fullWork.id }),
+        createMockContext({ errors: entityResource.errors }),
+      );
+    const tool = () => runToolContract(getWorkTool, { mbid: fullWork.id });
+    const before = JSON.stringify(raw);
+    const firstResource = await resource();
+    const firstTool = await tool();
+    const secondTool = await tool();
+    const secondResource = await resource();
+    expect(secondResource).toEqual(firstResource);
+    expect(secondTool).toEqual(firstTool);
+    expect(firstResource).toMatchObject({
+      recordingRelationshipSummary: { totalCount: 26, truncated: true, shown: 25, cap: 25 },
+    });
+    expect(
+      (firstResource as { relations: RawRelation[] }).relations.filter(
+        (r) => r['target-type'] === 'recording',
+      ),
+    ).toHaveLength(25);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+  it('relationships disabled: no truncation or relationship-count claim', async () => {
+    lookupMock.mockResolvedValueOnce(fullWork);
+    const result = await runToolContract(getWorkTool, {
+      mbid: fullWork.id,
+      inc_relationships: false,
+    });
+    expect(result.structuredContent).toMatchObject({ relationships: [], externalLinks: [] });
+    expect(result.structuredContent).not.toHaveProperty('truncated');
+    expect(result.structuredContent).not.toHaveProperty('totalCount');
+  });
   it('maps a full payload, splitting relationships and url-rels', async () => {
     lookupMock.mockResolvedValueOnce(fullWork);
     const ctx = createMockContext({ tenantId: 'test', errors: getWorkTool.errors });
@@ -110,12 +158,8 @@ describe('get_work', () => {
     });
   });
 
-  // Regression for #1: the work lookup returns every recording relationship
-  // unbounded (live-verified 486/486 on "A Day in the Life"). A prior guard
-  // fired ctx.enrich.truncated on recordingRelCount >= 25, contradicting the
-  // data it held. No truncation signal must be emitted, no matter how many
-  // recording-rels come back.
-  it('emits no truncation signal even with many recording relationships', async () => {
+  // Regression for #1: disclosure must agree with the relationships actually returned.
+  it('returns a finite recording slice with truthful disclosure on both surfaces', async () => {
     const recordingRels: RawRelation[] = Array.from({ length: 100 }, (_, i) => ({
       type: 'performance',
       'target-type': 'recording',
@@ -130,11 +174,44 @@ describe('get_work', () => {
     const input = getWorkTool.input.parse({ mbid: 'busy-work' });
     const result = await getWorkTool.handler(input, ctx);
 
-    // All 100 recording-rels are surfaced...
-    expect(result.relationships).toHaveLength(100);
-    // ...and the enrichment surface carries no truncation claim.
+    expect(result.relationships).toHaveLength(25);
     const enrichment = getEnrichment(ctx);
-    expect(enrichment.truncated).toBeUndefined();
-    expect(enrichment.notice).toBeUndefined();
+    expect(enrichment).toMatchObject({ totalCount: 100, truncated: true, shown: 25, cap: 25 });
+    expect(enrichment.notice).toContain('musicbrainz_get_recording');
+    expect(getWorkTool.format?.(result)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('Recording 24') }),
+      ]),
+    );
+    expect(JSON.stringify(getWorkTool.format?.(result))).not.toContain('Recording 25');
   });
+  it.each([0, 24, 25, 26])(
+    'keeps all non-recording relationships at recording count %s',
+    async (count) => {
+      const recordings = Array.from(
+        { length: count },
+        (_, i): RawRelation => ({
+          'target-type': 'recording',
+          type: 'performance',
+          recording: { id: `r${i}`, title: `R${i}` },
+        }),
+      );
+      lookupMock.mockResolvedValueOnce({
+        ...fullWork,
+        relations: [fullWork.relations![0], ...recordings, fullWork.relations![2]],
+      });
+      const result = await runToolContract(getWorkTool, { mbid: fullWork.id });
+      const structured = result.structuredContent as {
+        relationships: { targetType: string }[];
+        externalLinks: unknown[];
+        totalCount: number;
+        truncated?: boolean;
+      };
+      expect(structured.relationships).toHaveLength(Math.min(count, 25) + 1);
+      expect(structured.externalLinks).toHaveLength(1);
+      expect(structured.totalCount).toBe(count);
+      expect(structured.truncated).toBe(count > 25 ? true : undefined);
+      expect(JSON.stringify(result.content)).toContain('John Lennon');
+    },
+  );
 });

@@ -2,7 +2,7 @@
  * @fileoverview musicbrainz_get_work — work (a composition, the song as written,
  * distinct from any recording) by MBID: type, language(s), ISWCs, writer/composer/
  * lyricist relationships, and the recordings that perform it. The work lookup
- * returns every recording relationship unbounded (no per-page cap).
+ * returns the first 25 recording relationships and every non-recording relation.
  * @module mcp-server/tools/definitions/get-work.tool
  */
 
@@ -10,11 +10,13 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
 import type { RawWork } from '@/services/musicbrainz/types.js';
+import { sliceWorkRelations } from '@/services/musicbrainz/work-relations.js';
 import {
   AliasSchema,
   classifyMbidError,
   ExternalLinkSchema,
   MBID_EXAMPLE,
+  MbidInput,
   normalizeAliases,
   normalizeRelations,
   normalizeTags,
@@ -30,14 +32,14 @@ import {
 export const getWorkTool = tool('musicbrainz_get_work', {
   title: 'musicbrainz-mcp-server: get work',
   description:
-    'Work (a composition — the song as written, distinct from any specific recording) by MBID: type, language(s), ISWCs (the work-level standard identifier), writer/composer/lyricist relationships (with the credited artist MBID), aliases, tags, and the recordings that perform it. The recording relationships are returned in full (the work lookup does not page them).',
+    'Work (a composition, distinct from a recording) by MBID: type, languages, ISWCs, writers/composers/lyricists, aliases, tags, and external links. This server returns the first 25 recording relationships with their exact total and actual truncation disclosure, preserving all other relationships. Browse recording entities with musicbrainz_browse_entities (target_type=recording, link.work), then use musicbrainz_get_recording for work relationship attributes and dates; browse alone does not return those details.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
     {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
+      when: 'The MBID is malformed or the all-zeros sentinel (rejected before fetch), or MusicBrainz rejects it with HTTP 400.',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entityType=work) to find one from a title.`,
     },
     {
@@ -50,7 +52,9 @@ export const getWorkTool = tool('musicbrainz_get_work', {
   ],
 
   input: z.object({
-    mbid: z.string().describe('Work MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Work MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
     inc_relationships: z
       .boolean()
       .default(true)
@@ -71,12 +75,34 @@ export const getWorkTool = tool('musicbrainz_get_work', {
     relationships: z
       .array(RelationSchema)
       .describe(
-        'Writer/composer/lyricist relationships and recording-rels — the complete set (may be empty).',
+        'All non-recording relationships and the first 25 recording relationships in upstream order (may be empty).',
       ),
     externalLinks: z
       .array(ExternalLinkSchema)
       .describe('External resource links (url-rels) (may be empty).'),
   }),
+
+  enrichment: {
+    totalCount: z
+      .number()
+      .optional()
+      .describe(
+        'Exact number of recording relationships before the server-side slice. Absent when relationships are disabled.',
+      ),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe('True only when recording relationships were omitted beyond 25.'),
+    shown: z
+      .number()
+      .optional()
+      .describe('Number of recording relationships returned when truncated.'),
+    cap: z.number().optional().describe('Server-side recording relationship cap, when truncated.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('Recording enumeration and relationship-detail retrieval guidance when truncated.'),
+  },
 
   async handler(input, ctx) {
     ctx.log.info('musicbrainz_get_work', { mbid: input.mbid });
@@ -97,7 +123,9 @@ export const getWorkTool = tool('musicbrainz_get_work', {
       throw error;
     }
 
-    const { relationships, externalLinks } = normalizeRelations(raw.relations);
+    const slice = sliceWorkRelations(input.inc_relationships ? raw.relations : undefined, raw.id);
+    const { relationships, externalLinks } = normalizeRelations(slice.relations);
+    if (input.inc_relationships) ctx.enrich(slice.summary);
     const languages = raw.languages ?? (raw.language ? [raw.language] : []);
 
     return {

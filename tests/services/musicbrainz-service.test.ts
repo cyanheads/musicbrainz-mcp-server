@@ -64,18 +64,64 @@ afterEach(() => {
 });
 
 describe('MusicBrainzService', () => {
+  it.each([
+    'not-a-uuid',
+    '00000000-0000-0000-0000-000000000000',
+    '{a74b1b7f-71a5-4011-9441-d0b5e4122711}',
+  ])('rejects invalid lookup and browse MBID %s before fetch', async (mbid) => {
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const service = makeService();
+    await expect(
+      service.lookup('artist', mbid, { inc: [] }, createMockContext()),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCode.ValidationError });
+    await expect(
+      service.browse(
+        'release',
+        { link: 'artist', linkMbid: mbid, limit: 25, offset: 0 },
+        createMockContext(),
+      ),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCode.ValidationError });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('normalizes uppercase and whitespace with arbitrary hexadecimal version/variant groups', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}));
+    await makeService().lookup(
+      'artist',
+      '  ABCDEF12-ABCD-0123-0123-ABCDEF123456 \n',
+      { inc: [] },
+      createMockContext(),
+    );
+    expect(fetchMock.mock.calls[0]![0]).toContain('/artist/abcdef12-abcd-0123-0123-abcdef123456?');
+  });
+  it.each(['release-group', 'release', 'recording', 'artist', 'label', 'work'] as const)(
+    'requests artist credits only for credited browse target %s',
+    async (target) => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({}));
+      await makeService().browse(
+        target,
+        { link: 'artist', linkMbid: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', limit: 25, offset: 0 },
+        createMockContext(),
+      );
+      const url = new URL(fetchMock.mock.calls[0]![0]);
+      expect(url.searchParams.get('inc')).toBe(
+        ['release-group', 'release', 'recording'].includes(target) ? 'artist-credits' : null,
+      );
+    },
+  );
   it('parses a JSON lookup response and sends the descriptive User-Agent', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'abc', name: 'Radiohead' }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', name: 'Radiohead' }),
+    );
     const ctx = createMockContext({ tenantId: 'test' });
     const result = await makeService().lookup<{ id: string; name: string }>(
       'artist',
-      'abc',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
       { inc: ['tags'] },
       ctx,
     );
-    expect(result).toEqual({ id: 'abc', name: 'Radiohead' });
+    expect(result).toEqual({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', name: 'Radiohead' });
     const [url, , , options] = fetchMock.mock.calls[0]!;
-    expect(url).toContain('/artist/abc');
+    expect(url).toContain('/artist/a74b1b7f-71a5-4011-9441-d0b5e4122711');
     expect(url).toContain('inc=tags');
     expect(url).toContain('fmt=json');
     expect((options.headers as Record<string, string>)['User-Agent']).toBe(
@@ -88,7 +134,9 @@ describe('MusicBrainzService', () => {
       text: async () => '<!DOCTYPE html><html><body>503</body></html>',
     } as Response);
     const ctx = createMockContext({ tenantId: 'test' });
-    await expect(makeService().lookup('artist', 'abc', { inc: [] }, ctx)).rejects.toMatchObject({
+    await expect(
+      makeService().lookup('artist', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', { inc: [] }, ctx),
+    ).rejects.toMatchObject({
       code: JsonRpcErrorCode.ServiceUnavailable,
     });
   });
@@ -97,28 +145,45 @@ describe('MusicBrainzService', () => {
     fetchMock.mockRejectedValueOnce(notFound('Not Found'));
     const ctx = createMockContext({ tenantId: 'test' });
     await expect(
-      makeService().lookup('artist', '00000000-0000-0000-0000-000000000000', { inc: [] }, ctx),
+      makeService().lookup('artist', '11111111-1111-4111-8111-111111111111', { inc: [] }, ctx),
     ).rejects.toMatchObject({ code: JsonRpcErrorCode.NotFound });
   });
 
   it('serves a cached response on the second call without re-fetching', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'abc', name: 'Cached' }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', name: 'Cached' }),
+    );
     const ctx = createMockContext({ tenantId: 'test' });
     const service = makeService(3600);
-    const first = await service.lookup('artist', 'abc', { inc: [] }, ctx);
-    const second = await service.lookup('artist', 'abc', { inc: [] }, ctx);
+    const first = await service.lookup(
+      'artist',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      { inc: [] },
+      ctx,
+    );
+    const second = await service.lookup(
+      'artist',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      { inc: [] },
+      ctx,
+    );
     expect(second).toEqual(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('keys the cache on the inc set (different inc → separate fetch)', async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse({ id: 'abc', v: 1 }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'abc', v: 2 }));
+      .mockResolvedValueOnce(jsonResponse({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', v: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', v: 2 }));
     const ctx = createMockContext({ tenantId: 'test' });
     const service = makeService(3600);
-    await service.lookup('artist', 'abc', { inc: ['tags'] }, ctx);
-    await service.lookup('artist', 'abc', { inc: ['genres'] }, ctx);
+    await service.lookup('artist', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', { inc: ['tags'] }, ctx);
+    await service.lookup(
+      'artist',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      { inc: ['genres'] },
+      ctx,
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -157,7 +222,9 @@ describe('MusicBrainzService', () => {
   it('does not retry a non-transient error (maxRetries=0)', async () => {
     fetchMock.mockRejectedValueOnce(new McpError(JsonRpcErrorCode.InvalidParams, 'Invalid mbid.'));
     const ctx = createMockContext({ tenantId: 'test' });
-    await expect(makeService().lookup('artist', 'zero', { inc: [] }, ctx)).rejects.toMatchObject({
+    await expect(
+      makeService().lookup('artist', 'a74b1b7f-71a5-4011-9441-d0b5e4122711', { inc: [] }, ctx),
+    ).rejects.toMatchObject({
       code: JsonRpcErrorCode.ValidationError,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -169,7 +236,9 @@ describe('MusicBrainzService', () => {
   // not throw a key-validation error, or every cached call fails. (The plain
   // mock context's Map-backed state skips validation and hid this.)
   it('caches a search through real key-validating storage without a key error', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ count: 1, artists: [{ id: 'abc' }] }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ count: 1, artists: [{ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711' }] }),
+    );
     const ctx = realStorageContext();
     const service = makeService(3600);
     const first = await service.search('artist', 'Radiohead', { limit: 3, offset: 0 }, ctx);
@@ -179,18 +248,20 @@ describe('MusicBrainzService', () => {
   });
 
   it('caches an inc lookup (path with + and ?) through real storage without a key error', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'abc', name: 'Radiohead' }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', name: 'Radiohead' }),
+    );
     const ctx = realStorageContext();
     const service = makeService(3600);
     const first = await service.lookup(
       'artist',
-      'abc',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
       { inc: ['release-groups', 'url-rels'] },
       ctx,
     );
     const second = await service.lookup(
       'artist',
-      'abc',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
       { inc: ['release-groups', 'url-rels'] },
       ctx,
     );

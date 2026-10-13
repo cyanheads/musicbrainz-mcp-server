@@ -29,6 +29,7 @@ import {
 } from '@cyanheads/mcp-ts-core/utils';
 
 import { getServerConfig } from '@/config/server-config.js';
+import { normalizeMbid } from './mbid.js';
 import { RateLimiter } from './rate-limiter.js';
 import type {
   BrowseEnvelope,
@@ -115,32 +116,36 @@ export class MusicBrainzService {
   }
 
   /** Look up one entity by MBID with the requested `inc` sub-resources folded in. */
-  lookup<T>(
+  async lookup<T>(
     type: EntityType,
     mbid: string,
     params: LookupParams,
     ctx: Context,
     options?: CallOptions,
   ): Promise<T> {
+    const normalizedMbid = normalizeMbid(mbid);
     const search = new URLSearchParams({ fmt: 'json' });
     if (params.inc.length > 0) search.set('inc', params.inc.join('+'));
-    return this.request<T>(`/${type}/${mbid}?${search.toString()}`, ctx, options);
+    return await this.request<T>(`/${type}/${normalizedMbid}?${search.toString()}`, ctx, options);
   }
 
   /** Paginate the complete set of `target` entities linked to one parent MBID. */
-  browse(
+  async browse(
     target: EntityType,
     params: BrowseParams,
     ctx: Context,
     options?: CallOptions,
   ): Promise<BrowseEnvelope> {
     const search = new URLSearchParams({
-      [params.link]: params.linkMbid,
+      [params.link]: normalizeMbid(params.linkMbid),
       limit: String(params.limit),
       offset: String(params.offset),
       fmt: 'json',
     });
-    return this.request<BrowseEnvelope>(`/${target}?${search.toString()}`, ctx, options);
+    if (target === 'release-group' || target === 'release' || target === 'recording') {
+      search.set('inc', 'artist-credits');
+    }
+    return await this.request<BrowseEnvelope>(`/${target}?${search.toString()}`, ctx, options);
   }
 
   /**

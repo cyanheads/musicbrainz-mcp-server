@@ -34,6 +34,9 @@ import {
 const STATUS_BY_MARKER: Record<string, number> = { bad: 400, missing: 404, down: 503 };
 
 function statusFor(url: string): number {
+  if (url.includes('33333333-3333-4333-8333-333333333333')) return 400;
+  if (url.includes('11111111-1111-4111-8111-111111111111')) return 404;
+  if (url.includes('22222222-2222-4222-8222-222222222222')) return 503;
   const marker = Object.keys(STATUS_BY_MARKER).find((m) => url.includes(`-${m}-`));
   return marker ? (STATUS_BY_MARKER[marker] as number) : 500;
 }
@@ -41,7 +44,7 @@ function statusFor(url: string): number {
 let http: ReturnType<typeof createFetchMock>;
 
 beforeAll(() => {
-  // Fast limiter, no cache, no retries: each case is exactly one upstream exchange.
+  // Fast limiter, no cache, no retries: one MusicBrainz request per lookup.
   vi.stubEnv('MUSICBRAINZ_RATE_LIMIT_RPS', '50');
   vi.stubEnv('MUSICBRAINZ_CACHE_TTL', '0');
   vi.stubEnv('MUSICBRAINZ_MAX_RETRIES', '0');
@@ -108,15 +111,26 @@ describe('MBID lookup tools — upstream status → declared reason', () => {
         '400',
         'invalid_mbid',
         JsonRpcErrorCode.ValidationError,
-        '00000000-bad-0000-0000-000000000000',
+        '33333333-3333-4333-8333-333333333333',
       ],
-      ['404', 'entity_not_found', JsonRpcErrorCode.NotFound, '00000000-missing-0000-000000000000'],
+      [
+        '404',
+        'entity_not_found',
+        JsonRpcErrorCode.NotFound,
+        '11111111-1111-4111-8111-111111111111',
+      ],
     ] as const)(
       'maps an upstream %s to %s with the contract message, recovery, and mbid',
       async (_status, reason, code, mbid) => {
+        const callsBefore = http.calls.length;
         const result = await runToolContract(def, { mbid });
         const contract = entry(errors, reason);
 
+        expect(
+          http.calls
+            .slice(callsBefore)
+            .filter((call) => new URL(call.request.url).pathname.startsWith('/ws/2/')),
+        ).toHaveLength(1);
         expect(result.isError).toBe(true);
         expect(errorOf(result)).toEqual({
           code,
@@ -132,7 +146,7 @@ describe('MBID lookup tools — upstream status → declared reason', () => {
 
     it('lets an undeclared upstream failure (503) bubble with no reason', async () => {
       const result = await runToolContract(def, {
-        mbid: '00000000-down-0000-0000-000000000000',
+        mbid: '22222222-2222-4222-8222-222222222222',
       });
 
       expect(result.isError).toBe(true);

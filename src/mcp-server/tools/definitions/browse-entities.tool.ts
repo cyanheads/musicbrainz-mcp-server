@@ -1,9 +1,8 @@
 /**
  * @fileoverview musicbrainz_browse_entities — paginate the COMPLETE set of
  * entities linked to a parent MBID: every release on a label, every release-group
- * by an artist, every recording of a work, every release in a release-group. The
- * only complete-enumeration path — the get_* tools' embedded lists are capped at
- * one page (25), so this is a correctness tool, not a convenience.
+ * by an artist, every recording of a work or release, every release in a group.
+ * Enumerates entities rather than ordered tracks or performance relationship details.
  * @module mcp-server/tools/definitions/browse-entities.tool
  */
 
@@ -28,6 +27,7 @@ import {
   artistCreditString,
   classifyMbidError,
   formatDuration,
+  MbidInput,
   normalizeArtistCredits,
   safeText,
 } from './_shared.js';
@@ -52,6 +52,12 @@ const EntityRefSchema = z
       .describe('Entity name (artist/label) or title (release-group/release/recording/work).'),
     disambiguation: z.string().optional().describe('Short qualifier. Omitted when absent.'),
     type: z.string().optional().describe('Entity subtype, where applicable. Omitted when absent.'),
+    status: z
+      .string()
+      .optional()
+      .describe(
+        'Release status (e.g. Official or Bootleg). Omitted for other entity types or when absent.',
+      ),
     artistCredit: z
       .string()
       .optional()
@@ -101,13 +107,13 @@ function mapEntity(type: EntityType, raw: unknown): z.infer<typeof EntityRefSche
   const date = isReleaseGroup
     ? (e as RawReleaseGroup)['first-release-date']
     : (e as RawRelease).date;
-  const subtype = isReleaseGroup
-    ? (e as RawReleaseGroup)['primary-type']
-    : (e as RawRelease).status;
+  const subtype = isReleaseGroup ? (e as RawReleaseGroup)['primary-type'] : undefined;
+  const status = !isReleaseGroup ? (e as RawRelease).status : undefined;
   return {
     ...common,
     name: e.title ?? '',
     ...(subtype ? { type: subtype } : {}),
+    ...(status ? { status } : {}),
     artistCredit: artistCreditString(normalizeArtistCredits(e['artist-credit'])),
     ...(date ? { date } : {}),
     ...((e as RawRelease).country ? { country: (e as RawRelease).country as string } : {}),
@@ -117,16 +123,16 @@ function mapEntity(type: EntityType, raw: unknown): z.infer<typeof EntityRefSche
 export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
   title: 'musicbrainz-mcp-server: browse entities',
   description:
-    'Paginate the COMPLETE set of entities linked to a parent MBID — every release-group by an artist, every release on a label, every recording of a work, every release in a release-group. This is the only complete-enumeration path: the get_* tools embed at most one page (25) of any linked list, so use this tool whenever a linked set may exceed a page (a prolific artist, a major label with thousands of releases, a heavily-covered work). Provide exactly ONE link MBID matching a valid parent→child relationship for the target_type. Pages arbitrarily deep via offset; totalCount is the true upstream total.',
+    'Paginate entities linked to one parent MBID: release-groups by artist; releases by artist, label, release-group, or recording; recordings by artist, work, or release; works by artist; artists/labels by area. Artist release-groups and release-group editions embed one upstream page in get_* lookups; use this tool for the complete entity set. Recording browse returns identities, not performance attributes/dates or ordered release tracks: use musicbrainz_get_recording for work relationships and musicbrainz_get_release for tracks. Provide exactly one valid parent link. offset pages to any depth; totalCount is the upstream entity total. Release rows carry status, other entity subtypes use type.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
     {
       reason: 'invalid_link',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'No link MBID was provided, more than one was provided, or the link MBID is malformed (HTTP 400).',
+      when: 'A parent key is unknown, aliases collide, not exactly one nonempty parent is supplied, or the MBID/parent combination is invalid.',
       recovery:
-        'Provide exactly one link MBID (e.g. link.artist) that is a valid parent for the target_type. MBIDs are 36-char UUIDs.',
+        'Provide exactly one parent key: artist, label, release-group, release, recording, work, or area. releaseGroup and release_group alias release-group; never combine aliases. Supply a 36-character hexadecimal UUID MBID valid for target_type.',
     },
     {
       reason: 'entity_not_found',
@@ -141,22 +147,29 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     target_type: z.enum(TARGET_TYPES).describe('The entity type to enumerate (the children).'),
     link: z
       .object({
-        artist: z
-          .string()
-          .optional()
-          .describe('Parent artist MBID (e.g. release-groups/recordings/releases by this artist).'),
-        label: z.string().optional().describe('Parent label MBID (releases on this label).'),
-        'release-group': z
-          .string()
-          .optional()
-          .describe('Parent release-group MBID (releases in this group).'),
-        recording: z
-          .string()
-          .optional()
-          .describe('Parent recording MBID (releases containing this recording).'),
-        work: z.string().optional().describe('Parent work MBID (recordings of this work).'),
-        area: z.string().optional().describe('Parent area MBID (artists/labels in this area).'),
+        artist: MbidInput.optional().describe(
+          'Parent artist MBID (e.g. release-groups/recordings/releases by this artist).',
+        ),
+        label: MbidInput.optional().describe('Parent label MBID (releases on this label).'),
+        'release-group': MbidInput.optional().describe(
+          'Parent release-group MBID (releases in this group).',
+        ),
+        release: MbidInput.optional().describe(
+          'Parent release MBID (recording entities in this edition, not ordered tracks).',
+        ),
+        releaseGroup: MbidInput.optional().describe(
+          'Alias for release-group; use only one spelling.',
+        ),
+        release_group: MbidInput.optional().describe(
+          'Alias for release-group; use only one spelling.',
+        ),
+        recording: MbidInput.optional().describe(
+          'Parent recording MBID (releases containing this recording).',
+        ),
+        work: MbidInput.optional().describe('Parent work MBID (recordings of this work).'),
+        area: MbidInput.optional().describe('Parent area MBID (artists/labels in this area).'),
       })
+      .catchall(z.unknown())
       .describe(
         'Exactly one parent MBID. The valid key depends on target_type (see the description).',
       ),
@@ -174,7 +187,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     linkType: z
       .string()
       .describe(
-        'The parent link type used (artist, label, release-group, recording, work, or area).',
+        'The parent link type used (artist, label, release-group, release, recording, work, or area).',
       ),
     linkMbid: z.string().describe('The parent MBID that was browsed.'),
     entities: z.array(EntityRefSchema).describe('This page of linked entities, in upstream order.'),
@@ -209,7 +222,39 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     ctx.log.info('musicbrainz_browse_entities', { target: input.target_type });
     const service = getMusicBrainzService();
 
-    const linkEntries = Object.entries(input.link).filter(
+    const acceptedKeys = [
+      'artist',
+      'label',
+      'release-group',
+      'release',
+      'recording',
+      'work',
+      'area',
+    ];
+    const aliases = ['releaseGroup', 'release_group'];
+    const unknownKeys = Object.keys(input.link).filter(
+      (key) => !acceptedKeys.includes(key) && !aliases.includes(key),
+    );
+    if (unknownKeys.length) {
+      throw ctx.fail(
+        'invalid_link',
+        `Unknown link key(s): ${unknownKeys.join(', ')}. Accepted keys: ${acceptedKeys.join(', ')}.`,
+      );
+    }
+    const groupKeys = ['release-group', ...aliases].filter((key) => Object.hasOwn(input.link, key));
+    if (groupKeys.length > 1) {
+      throw ctx.fail(
+        'invalid_link',
+        `release-group alias collision: ${groupKeys.join(', ')}. Supply only one spelling.`,
+      );
+    }
+    const normalizedLink = Object.fromEntries(
+      Object.entries(input.link).map(([key, value]) => [
+        aliases.includes(key) ? 'release-group' : key,
+        value,
+      ]),
+    );
+    const linkEntries = Object.entries(normalizedLink).filter(
       ([, v]) => typeof v === 'string' && v.length > 0,
     ) as [BrowseLink, string][];
     const first = linkEntries[0];
@@ -219,7 +264,8 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
         `Provide exactly one link MBID — received ${linkEntries.length}.`,
       );
     }
-    const [linkType, linkMbid] = first;
+    const [linkType, suppliedMbid] = first;
+    const linkMbid = suppliedMbid.trim().toLowerCase();
 
     let envelope: BrowseEnvelope;
     try {
@@ -276,6 +322,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     for (const e of result.entities) {
       const meta = [
         e.type ? safeText(e.type) : null,
+        e.status ? safeText(e.status) : null,
         e.artistCredit ? safeText(e.artistCredit) : null,
         e.date,
         e.country,

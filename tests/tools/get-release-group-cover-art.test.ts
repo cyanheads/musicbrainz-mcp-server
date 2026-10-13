@@ -266,7 +266,7 @@ describe('get_release_group — coverArt from the Cover Art Archive', () => {
             ),
         },
       );
-      const result = await runToolContract(getReleaseGroupTool, { mbid: 'not-a-uuid' });
+      const result = await runToolContract(getReleaseGroupTool, { mbid: RG });
       expect(
         (result.structuredContent as { error?: { data?: { reason?: string } } }).error?.data
           ?.reason,

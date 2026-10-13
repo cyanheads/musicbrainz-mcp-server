@@ -2,8 +2,8 @@
  * @fileoverview musicbrainz_get_artist — artist profile by MBID: type, country,
  * life span, gender, area, aliases, tags/genres, plus discography (release-groups)
  * and band-membership / collaboration relationships and external links. The 80%
- * artist-detail call. Discography and relationships are capped at one page by the
- * lookup endpoint — musicbrainz_browse_entities enumerates the full set.
+ * artist-detail call. Release-groups embed one upstream page; relationships do
+ * not. musicbrainz_browse_entities enumerates the full release-group set.
  * @module mcp-server/tools/definitions/get-artist.tool
  */
 
@@ -17,6 +17,7 @@ import {
   ExternalLinkSchema,
   LifeSpanSchema,
   MBID_EXAMPLE,
+  MbidInput,
   normalizeAliases,
   normalizeLifeSpan,
   normalizeRelations,
@@ -54,14 +55,14 @@ const ReleaseGroupRefSchema = z
 export const getArtistTool = tool('musicbrainz_get_artist', {
   title: 'musicbrainz-mcp-server: get artist',
   description:
-    "Artist profile by MBID: type (person/group/…), country, life span, gender, area, aliases, tags/genres, plus the discography (release-groups) and band-membership / collaboration relationships and external links (Wikidata QID, Discogs, official site — surfaced as url-rels chainable to those servers). The 80% artist-detail call. Discography and relationships are capped at one page (25); for a prolific artist's complete release-group list, call musicbrainz_browse_entities with target_type=release-group and the artist link.",
+    'Artist profile by MBID: type, country, life span, gender, area, aliases, tags/genres, release-groups, band-membership / collaboration relationships, and external links. Release-groups embed one upstream page (25); relationships are not capped. For the complete release-group list, call musicbrainz_browse_entities with target_type=release-group and link.artist.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
     {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
+      when: 'The MBID is malformed or the all-zeros sentinel (rejected before fetch), or MusicBrainz rejects it with HTTP 400.',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities to find an artist's MBID from its name.`,
     },
     {
@@ -74,7 +75,9 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
   ],
 
   input: z.object({
-    mbid: z.string().describe('Artist MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Artist MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
     inc_release_groups: z
       .boolean()
       .default(true)

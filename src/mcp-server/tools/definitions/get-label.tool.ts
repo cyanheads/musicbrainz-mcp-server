@@ -16,6 +16,7 @@ import {
   ExternalLinkSchema,
   LifeSpanSchema,
   MBID_EXAMPLE,
+  MbidInput,
   normalizeAliases,
   normalizeLifeSpan,
   normalizeRelations,
@@ -38,7 +39,7 @@ export const getLabelTool = tool('musicbrainz_get_label', {
     {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
+      when: 'The MBID is malformed or the all-zeros sentinel (rejected before fetch), or MusicBrainz rejects it with HTTP 400.',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entityType=label) to find one from a name.`,
     },
     {
@@ -51,7 +52,9 @@ export const getLabelTool = tool('musicbrainz_get_label', {
   ],
 
   input: z.object({
-    mbid: z.string().describe('Label MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Label MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
   }),
 
   output: z.object({

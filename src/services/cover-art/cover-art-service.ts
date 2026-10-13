@@ -28,6 +28,7 @@ import {
 } from '@cyanheads/mcp-ts-core/utils';
 
 import { getServerConfig } from '@/config/server-config.js';
+import { normalizeMbid } from '@/services/musicbrainz/mbid.js';
 import type { CallOptions, RawCoverArtResponse } from '@/services/musicbrainz/types.js';
 
 /** Entity types the Cover Art Archive serves images for. */
@@ -71,11 +72,9 @@ export class CoverArtService {
     ctx: Context,
     options?: CallOptions,
   ): Promise<CoverArtLookup> {
-    const path = `/${entityType}/${mbid}`;
-    // Hash the path to a `ctx.state`-safe key. The storage validator allows only
-    // `[a-zA-Z0-9_.\-/]` — so a `:` separator is rejected, and a malformed MBID
-    // can carry characters that would otherwise throw a generic ValidationError
-    // here and pre-empt the upstream 400 → invalid_mbid. `_` joins the prefix.
+    const path = `/${entityType}/${normalizeMbid(mbid)}`;
+    // Hash the canonical path to a fixed-length `ctx.state`-safe key, joined to
+    // its prefix with `_` rather than the storage validator's forbidden `:`.
     // The `v2` segment versions the cached shape: an entry written before
     // `found` existed cached a 404 as a bare `{ images: [] }`, which would read
     // back as a 200 and skip the caller's MBID verification.

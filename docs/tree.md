@@ -1,6 +1,6 @@
 # musicbrainz-mcp-server - Directory Structure
 
-Generated on: 2026-10-08 12:23:17
+Generated on: 2026-10-13 14:07:20
 
 ```text
 musicbrainz-mcp-server/
@@ -161,9 +161,11 @@ musicbrainz-mcp-server/
 │   │   ├── cover-art/
 │   │   │   └── cover-art-service.ts
 │   │   └── musicbrainz/
+│   │       ├── mbid.ts
 │   │       ├── musicbrainz-service.ts
 │   │       ├── rate-limiter.ts
-│   │       └── types.ts
+│   │       ├── types.ts
+│   │       └── work-relations.ts
 │   └── index.ts
 ├── tests/
 │   ├── config/
@@ -177,6 +179,7 @@ musicbrainz-mcp-server/
 │   │   ├── musicbrainz-service.test.ts
 │   │   └── rate-limiter.test.ts
 │   └── tools/
+│       ├── browse-entities.test.ts
 │       ├── contract-boundary.test.ts
 │       ├── get-artist.test.ts
 │       ├── get-cover-art-verification.test.ts
@@ -186,7 +189,8 @@ musicbrainz-mcp-server/
 │       ├── get-work.test.ts
 │       ├── lookup-error-contract.test.ts
 │       ├── lookup-identifier.test.ts
-│       └── search-entities.test.ts
+│       ├── search-entities.test.ts
+│       └── shared-rendering.test.ts
 ├── .dockerignore
 ├── .env.example
 ├── .gitattributes

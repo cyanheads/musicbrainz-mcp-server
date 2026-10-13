@@ -62,7 +62,7 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     await expect(
       makeService().lookup(
         'artist',
-        'not-a-uuid',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         { inc: [] },
         createMockContext({ tenantId: 't' }),
       ),
@@ -84,7 +84,7 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     try {
       await makeService().lookup(
         'artist',
-        'secret-lookup-value',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         { inc: ['tags'] },
         createMockContext({ tenantId: 't' }),
       );
@@ -98,7 +98,7 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     expect(data).toBeTypeOf('object');
     expect(Object.keys(data ?? {}).length).toBeGreaterThan(0);
     expect(data).not.toHaveProperty('url');
-    expect(JSON.stringify(data)).not.toContain('secret-lookup-value');
+    expect(JSON.stringify(data)).not.toContain('a74b1b7f-71a5-4011-9441-d0b5e4122711');
   });
 
   it('maps a 404 to NotFound so the tool contract can report entity_not_found', async () => {
@@ -113,7 +113,7 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     await expect(
       makeService().lookup(
         'artist',
-        '00000000-0000-0000-0000-000000000000',
+        '11111111-1111-4111-8111-111111111111',
         { inc: [] },
         createMockContext({ tenantId: 't' }),
       ),
@@ -124,12 +124,18 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     http = createFetchMock([
       {
         match: (request) => request.url.startsWith(`${BASE}/artist/`),
-        respond: () => Response.json({ id: 'abc', name: 'Radiohead' }),
+        respond: () =>
+          Response.json({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', name: 'Radiohead' }),
       },
     ]);
     http.install();
 
-    await makeService().lookup('artist', 'abc', { inc: [] }, createMockContext({ tenantId: 't' }));
+    await makeService().lookup(
+      'artist',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      { inc: [] },
+      createMockContext({ tenantId: 't' }),
+    );
 
     expect(http.calls).toHaveLength(1);
     expect(http.calls[0]?.request.headers.get('User-Agent')).toBe(
@@ -147,7 +153,12 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     http.install();
 
     await expect(
-      makeService().lookup('artist', 'abc', { inc: [] }, createMockContext({ tenantId: 't' })),
+      makeService().lookup(
+        'artist',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+        { inc: [] },
+        createMockContext({ tenantId: 't' }),
+      ),
     ).rejects.toMatchObject({ code: JsonRpcErrorCode.ServiceUnavailable });
   });
 
@@ -163,7 +174,7 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     await expect(
       makeService({ maxRetries: 1 }).lookup(
         'release',
-        'abc',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         { inc: [] },
         createMockContext({ tenantId: 't' }),
         { maxRetries: 0 },
@@ -179,7 +190,7 @@ describe('MusicBrainzService upstream HTTP boundary', () => {
     await expect(
       makeService({ timeoutMs: 30_000 }).lookup(
         'release',
-        'abc',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         { inc: [] },
         createMockContext({ tenantId: 't' }),
         { timeoutMs: 50 },

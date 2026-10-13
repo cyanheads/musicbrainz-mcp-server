@@ -55,6 +55,12 @@ const ResultSchema = z
       .describe(
         'Credited artist string, for release-group/release/recording results. Omitted for artist/label/work.',
       ),
+    status: z
+      .string()
+      .optional()
+      .describe(
+        'Release status (e.g. Official or Bootleg). Omitted for other entity types or when absent.',
+      ),
     date: z
       .string()
       .optional()
@@ -120,15 +126,15 @@ function mapHit(type: EntityType, raw: unknown): z.infer<typeof ResultSchema> {
   const date = isReleaseGroup
     ? (e as RawReleaseGroup)['first-release-date']
     : (e as RawRelease).date;
-  const primaryType = isReleaseGroup
-    ? (e as RawReleaseGroup)['primary-type']
-    : (e as RawRelease).status;
+  const primaryType = isReleaseGroup ? (e as RawReleaseGroup)['primary-type'] : undefined;
+  const status = !isReleaseGroup ? (e as RawRelease).status : undefined;
   return {
     mbid: e.id,
     name: e.title ?? '',
     score,
     ...(disambiguation ? { disambiguation } : {}),
     ...(primaryType ? { type: primaryType } : {}),
+    ...(status ? { status } : {}),
     artistCredit: artistCreditString(normalizeArtistCredits(e['artist-credit'])),
     ...(date ? { date } : {}),
     ...((e as RawRelease).country ? { country: (e as RawRelease).country as string } : {}),
@@ -138,7 +144,7 @@ function mapHit(type: EntityType, raw: unknown): z.infer<typeof ResultSchema> {
 export const searchEntitiesTool = tool('musicbrainz_search_entities', {
   title: 'musicbrainz-mcp-server: search entities',
   description:
-    'Full-text search across a MusicBrainz entity type (artist, release-group, release, recording, work, label) using a Lucene query string. Returns ranked matches with MBID, name/title, disambiguation, type, and a 0–100 relevance score (100 = exact). Starting point when resolving a name to an MBID — chain the returned MBID into the matching musicbrainz_get_* tool. Results are in MusicBrainz score-descending order. Supports field-scoped Lucene syntax (e.g. `artist:radiohead AND country:GB`).',
+    'Full-text search across a MusicBrainz entity type (artist, release-group, release, recording, work, label) using a Lucene query string. Returns ranked matches with MBID, name/title, disambiguation, subtype where applicable, release status, and a 0–100 relevance score (100 = exact). Release rows use status; other entity subtypes use type. Starting point when resolving a name to an MBID — chain the returned MBID into the matching musicbrainz_get_* tool. Results are in MusicBrainz score-descending order. Supports field-scoped Lucene syntax (e.g. `artist:radiohead AND country:GB`).',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -230,6 +236,7 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
       );
       lines.push(`**MBID:** ${r.mbid} | **Score:** ${r.score}`);
       if (r.type) lines.push(`**Type:** ${safeText(r.type)}`);
+      if (r.status) lines.push(`**Status:** ${safeText(r.status)}`);
       if (r.artistCredit) lines.push(`**Artist:** ${safeText(r.artistCredit)}`);
       if (r.date) lines.push(`**Date:** ${r.date}`);
       if (r.country) lines.push(`**Country:** ${r.country}`);

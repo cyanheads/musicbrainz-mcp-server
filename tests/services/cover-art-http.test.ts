@@ -39,13 +39,16 @@ afterEach(() => {
 describe('CoverArtService upstream HTTP boundary', () => {
   it('maps a real 404 to found=false with an empty image set', async () => {
     http = createFetchMock([
-      { match: `${BASE}/release/no-art`, respond: () => new Response('<html>', { status: 404 }) },
+      {
+        match: `${BASE}/release/a74b1b7f-71a5-4011-9441-d0b5e4122711`,
+        respond: () => new Response('<html>', { status: 404 }),
+      },
     ]);
     http.install();
 
     const result = await makeService().getImages(
       'release',
-      'no-art',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
       createMockContext({ tenantId: 't' }),
     );
     expect(result).toEqual({ images: [], found: false });
@@ -55,11 +58,11 @@ describe('CoverArtService upstream HTTP boundary', () => {
   it('maps a real 200 to found=true with the parsed images', async () => {
     http = createFetchMock([
       {
-        match: `${BASE}/release/has-art`,
+        match: `${BASE}/release/a74b1b7f-71a5-4011-9441-d0b5e4122711`,
         respond: () =>
           Response.json({
             images: [{ id: 1, image: 'https://caa.test/1.jpg', front: true }],
-            release: 'https://musicbrainz.org/release/has-art',
+            release: 'https://musicbrainz.org/release/a74b1b7f-71a5-4011-9441-d0b5e4122711',
           }),
       },
     ]);
@@ -67,35 +70,48 @@ describe('CoverArtService upstream HTTP boundary', () => {
 
     const result = await makeService().getImages(
       'release',
-      'has-art',
+      'a74b1b7f-71a5-4011-9441-d0b5e4122711',
       createMockContext({ tenantId: 't' }),
     );
     expect(result.found).toBe(true);
     expect(result.images).toHaveLength(1);
-    expect(result.release).toBe('https://musicbrainz.org/release/has-art');
+    expect(result.release).toBe(
+      'https://musicbrainz.org/release/a74b1b7f-71a5-4011-9441-d0b5e4122711',
+    );
   });
 
   it('reclassifies a real 400 to ValidationError', async () => {
     http = createFetchMock([
-      { match: `${BASE}/release/not-a-uuid`, respond: () => new Response('bad', { status: 400 }) },
+      {
+        match: `${BASE}/release/a74b1b7f-71a5-4011-9441-d0b5e4122711`,
+        respond: () => new Response('bad', { status: 400 }),
+      },
     ]);
     http.install();
 
     await expect(
-      makeService().getImages('release', 'not-a-uuid', createMockContext({ tenantId: 't' })),
+      makeService().getImages(
+        'release',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+        createMockContext({ tenantId: 't' }),
+      ),
     ).rejects.toMatchObject({ code: JsonRpcErrorCode.ValidationError });
+    expect(http.calls).toHaveLength(1);
   });
 
   it('retries a transient 503 up to the configured count when no per-call cap is given', async () => {
     http = createFetchMock([
-      { match: `${BASE}/release-group/rg`, respond: () => new Response('down', { status: 503 }) },
+      {
+        match: `${BASE}/release-group/a74b1b7f-71a5-4011-9441-d0b5e4122711`,
+        respond: () => new Response('down', { status: 503 }),
+      },
     ]);
     http.install();
 
     await expect(
       makeService({ maxRetries: 1 }).getImages(
         'release-group',
-        'rg',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         createMockContext({ tenantId: 't' }),
       ),
     ).rejects.toMatchObject({ code: JsonRpcErrorCode.ServiceUnavailable });
@@ -104,14 +120,17 @@ describe('CoverArtService upstream HTTP boundary', () => {
 
   it('honors a per-call maxRetries=0 — a transient 503 is attempted exactly once', async () => {
     http = createFetchMock([
-      { match: `${BASE}/release-group/rg`, respond: () => new Response('down', { status: 503 }) },
+      {
+        match: `${BASE}/release-group/a74b1b7f-71a5-4011-9441-d0b5e4122711`,
+        respond: () => new Response('down', { status: 503 }),
+      },
     ]);
     http.install();
 
     await expect(
       makeService({ maxRetries: 1 }).getImages(
         'release-group',
-        'rg',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         createMockContext({ tenantId: 't' }),
         { maxRetries: 0 },
       ),
@@ -126,7 +145,7 @@ describe('CoverArtService upstream HTTP boundary', () => {
     await expect(
       makeService({ timeoutMs: 30_000, maxRetries: 0 }).getImages(
         'release-group',
-        'rg',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         createMockContext({ tenantId: 't' }),
         { timeoutMs: 50 },
       ),
@@ -141,7 +160,7 @@ describe('CoverArtService upstream HTTP boundary', () => {
     await expect(
       makeService({ timeoutMs: 50, maxRetries: 0 }).getImages(
         'release-group',
-        'rg',
+        'a74b1b7f-71a5-4011-9441-d0b5e4122711',
         createMockContext({ tenantId: 't' }),
         { timeoutMs: 30_000 },
       ),

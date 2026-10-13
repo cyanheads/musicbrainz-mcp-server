@@ -17,6 +17,7 @@ import {
   ExternalLinkSchema,
   formatDuration,
   MBID_EXAMPLE,
+  MbidInput,
   normalizeArtistCredits,
   normalizeRelations,
   RelationSchema,
@@ -38,14 +39,14 @@ const ReleaseAppearanceSchema = z
 export const getRecordingTool = tool('musicbrainz_get_recording', {
   title: 'musicbrainz-mcp-server: get recording',
   description:
-    'Recording (a specific performance/track, distinct from the abstract work) by MBID: length, artist credits, ISRCs, the releases it appears on, the work(s) it performs (work-rels — chain to musicbrainz_get_work), and performance/production relationships (who played, produced, engineered, conducted — each with the role and the credited artist MBID). Relationships are capped at one page; for a heavily-covered recording call musicbrainz_browse_entities with target_type=recording and link.work.',
+    'Recording (a specific performance, distinct from the abstract work) by MBID: length, artist credits, ISRCs, release appearances, work relationships, and performer/production credits with attributes and dates. Relationships are not capped. Browse release appearances with musicbrainz_browse_entities (target_type=release, link.recording). Browse recording by work enumerates recording entities; this tool supplies their work relationship details.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
     {
       reason: 'invalid_mbid',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The MBID is malformed or the all-zeros sentinel (MusicBrainz returns HTTP 400).',
+      when: 'The MBID is malformed or the all-zeros sentinel (rejected before fetch), or MusicBrainz rejects it with HTTP 400.',
       recovery: `MBID must be a 36-character UUID (e.g. ${MBID_EXAMPLE}). Use musicbrainz_search_entities (entityType=recording) to find one from a title.`,
     },
     {
@@ -58,7 +59,9 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
   ],
 
   input: z.object({
-    mbid: z.string().describe('Recording MBID (36-character UUID).'),
+    mbid: MbidInput.describe(
+      'Recording MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
+    ),
     inc_relationships: z
       .boolean()
       .default(true)

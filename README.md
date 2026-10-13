@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.9-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.9-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -59,7 +59,7 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 ### `musicbrainz_search_entities` <sub>tool</sub>
 
 - One `entityType` per call (`artist`, `release-group`, `release`, `recording`, `work`, `label`) and a Lucene `query` with field scoping (`artist:radiohead AND country:GB`); `limit` 1–100 (default 25), `offset` for paging
-- Each hit carries `mbid`, `name`, and the raw 0–100 `score` in MusicBrainz order, plus type-specific fields such as `artistCredit`, `isrcs`, `iswcs`, and `length`; a whitespace-only query fails as `blank_query`
+- Each hit carries `mbid`, `name`, and the raw 0–100 `score` in MusicBrainz order, plus type-specific fields such as `artistCredit`, `isrcs`, `iswcs`, and `length`. Release rows use `status` (Official, Bootleg, …); artist, release-group, work, and label subtypes use `type`. A whitespace-only query fails as `blank_query`
 
 ---
 
@@ -94,7 +94,8 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 ### `musicbrainz_get_work` <sub>tool</sub>
 
 - `mbid`, plus `inc_relationships` (default `true`) for writer, composer, and lyricist credits, the recordings that perform it, and external links
-- Returns `type`, `languages`, `iswcs`, aliases, and tags; recording relationships come back in full, with no page cap
+- Returns `type`, `languages`, `iswcs`, aliases, and tags; this server keeps the first 25 recording relationships and every other relationship/link. `totalCount` is the exact recording-relationship count; actual omission adds `truncated`, `shown`, `cap`, and retrieval guidance
+- Browse `recording` by `work` to enumerate recording entities, then call `musicbrainz_get_recording` for their work relationship attributes and dates; browse does not reconstruct those details
 
 ---
 
@@ -114,7 +115,8 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 ### `musicbrainz_browse_entities` <sub>tool</sub>
 
-- `target_type` plus exactly one parent MBID in `link` (`artist`, `label`, `release-group`, `recording`, `work`, or `area`); `limit` 1–100 (default 25), `offset` to any depth
+- `target_type` plus exactly one parent MBID in `link` (`artist`, `label`, `release-group`, `release`, `recording`, `work`, or `area`); `releaseGroup`/`release_group` alias `release-group`. Unknown keys and alias collisions fail by name. `limit` 1–100 (default 25), `offset` to any depth
+- Browse `recording` by `release` for recording entities in an edition; `musicbrainz_get_release` supplies ordered tracks, medium positions, and repeated recording occurrences. Release rows use `status`; subtype fields for other entities use `type`
 - Reports the upstream `totalCount`; while entities remain, `truncated` is set and the notice gives the next `offset`. A missing, extra, or malformed link fails as `invalid_link`, an unknown parent as `entity_not_found`
 
 ---
@@ -131,6 +133,7 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 - `entity_type` is `artist`, `release-group`, `release`, `recording`, `work`, or `label`; returns the raw MusicBrainz record as `application/json`
 - Fetches the same default linked data as the matching `get_*` tool; failures are `invalid_mbid` and `entity_not_found`
+- Work JSON retains the first 25 recording-target relationships and all other relations/URLs, with exact count and actual truncation in `recordingRelationshipSummary`
 
 ## Features
 
@@ -139,13 +142,13 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 MusicBrainz-specific:
 
 - Keyless client for the MusicBrainz Web Service v2 and the Cover Art Archive. Every request carries the descriptive `User-Agent` MusicBrainz requires, `musicbrainz-mcp-server/<version> ( <contact> )`, with `MUSICBRAINZ_CONTACT` as the contact
-- Entities are addressed by MBID (a 36-character UUID); every `get_*` tool and the resource fail as `invalid_mbid` for a malformed or all-zeros ID and `entity_not_found` for an unknown one
+- Entities are addressed by MBID (a hyphenated hexadecimal UUID, with any version/variant groups); uppercase and surrounding whitespace normalize to lowercase. Malformed/all-zero IDs fail before fetch as `invalid_mbid` (`invalid_link` for browse), while a well-shaped unknown ID remains `entity_not_found`
 - One process-wide limiter holds MusicBrainz calls to ~1 request/second, shared by every client of an instance, so long browse runs pace accordingly
 - Lookups fold discography, relationships, tracklists, and external links into one request; responses are cached (24 h by default), with retry and backoff on transient 5xx and HTML error pages
 
 Agent-friendly output:
 
-- Truncation honesty: the `get_*` tools and the resource embed at most one page (25) of a linked list (work recordings excepted), and a capped discography or edition list returns `truncated`, `shown`, `cap`, and a notice naming the `musicbrainz_browse_entities` call that lists the rest
+- Artist release-groups and release-group editions embed one upstream page (25); browse enumerates the full entity set. Work recording relationships have a separate server-side cap of 25 with exact relationship counts and truthful disclosure. Artist/recording relationships and release tracklists are not subject to that slice; labels embed no releases
 - Provenance on search and browse: the effective query is echoed and the upstream total reported, so a partial window never reads as complete
 - Discriminated outputs: `musicbrainz_lookup_identifier` returns a `kind`-tagged union, so callers branch on data, not string parsing
 - Raw upstream relevance `score`, not a derived confidence; missing upstream fields stay absent rather than invented
