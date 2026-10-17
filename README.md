@@ -29,7 +29,7 @@
 
 ## Overview
 
-Open music metadata from the live MusicBrainz Web Service v2 and the Cover Art Archive. Search by name, look up entities by MBID or by ISRC, ISWC, or barcode, page through complete linked sets, and fetch cover art. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+Open music metadata from MusicBrainz and the Cover Art Archive: artists, releases, recordings, works, and labels. Search by name, look up by MBID, ISRC, ISWC, or barcode, page through complete discographies, and fetch cover art.
 
 ### Tools
 
@@ -94,8 +94,8 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 ### `musicbrainz_get_work` <sub>tool</sub>
 
 - `mbid`, plus `inc_relationships` (default `true`) for writer, composer, and lyricist credits, the recordings that perform it, and external links
-- Returns `type`, `languages`, `iswcs`, aliases, and tags; this server keeps the first 25 recording relationships and every other relationship/link. `totalCount` is the exact recording-relationship count; actual omission adds `truncated`, `shown`, `cap`, and retrieval guidance
-- Browse `recording` by `work` to enumerate recording entities, then call `musicbrainz_get_recording` for their work relationship attributes and dates; browse does not reconstruct those details
+- Returns `type`, `languages`, `iswcs`, aliases, and tags. Only the first 25 recording relationships are kept (other relationships and links are all kept); `totalCount` gives the full count, and `truncated`, `shown`, and `cap` appear when some were cut
+- To list every recording of a work, browse `recording` by `work`, then call `musicbrainz_get_recording` for relationship attributes and dates
 
 ---
 
@@ -115,9 +115,9 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 ### `musicbrainz_browse_entities` <sub>tool</sub>
 
-- `target_type` plus exactly one parent MBID in `link` (`artist`, `label`, `release-group`, `release`, `recording`, `work`, or `area`); `releaseGroup`/`release_group` alias `release-group`. Unknown keys and alias collisions fail by name. `limit` 1–100 (default 25), `offset` to any depth
-- Browse `recording` by `release` for recording entities in an edition; `musicbrainz_get_release` supplies ordered tracks, medium positions, and repeated recording occurrences. Release rows use `status`; subtype fields for other entities use `type`
-- Reports the upstream `totalCount`; while entities remain, `truncated` is set and the notice gives the next `offset`. A missing, extra, or malformed link fails as `invalid_link`, an unknown parent as `entity_not_found`
+- `target_type` plus exactly one parent MBID in `link` (`artist`, `label`, `release-group`, `release`, `recording`, `work`, or `area`); `releaseGroup`/`release_group` are accepted for `release-group`. `limit` 1–100 (default 25), `offset` to any depth
+- Reports the upstream `totalCount`; while more remain, `truncated` is set and the notice gives the next `offset`. Release rows use `status`; other entities use `type`
+- A missing, extra, or malformed link fails as `invalid_link`, an unknown parent as `entity_not_found`. For ordered tracks of an edition use `musicbrainz_get_release`
 
 ---
 
@@ -125,7 +125,7 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 - `mbid` and `entity_type`: `release` (default) or `release-group`, which resolves to a `representativeRelease`
 - `images` with `front`/`back`, `types`, `imageUrl`, and 250/500/1200px thumbnails; an entity with no art returns an empty set and `hasArt: false`, not an error
-- An archive 404 is checked against MusicBrainz, so an unknown MBID fails as `entity_not_found`; if the check itself fails, the empty set stands with a notice that existence is unconfirmed
+- An unknown MBID fails as `entity_not_found`; if MusicBrainz can't confirm the MBID exists, the empty set comes back with a notice saying so
 
 ---
 
@@ -133,7 +133,7 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 - `entity_type` is `artist`, `release-group`, `release`, `recording`, `work`, or `label`; returns the raw MusicBrainz record as `application/json`
 - Fetches the same default linked data as the matching `get_*` tool; failures are `invalid_mbid` and `entity_not_found`
-- Work JSON retains the first 25 recording-target relationships and all other relations/URLs, with exact count and actual truncation in `recordingRelationshipSummary`
+- Work JSON keeps the first 25 recording relationships; `recordingRelationshipSummary` gives the exact count and whether any were cut
 
 ## Features
 
@@ -142,14 +142,14 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 MusicBrainz-specific:
 
 - Keyless client for the MusicBrainz Web Service v2 and the Cover Art Archive. Every request carries the descriptive `User-Agent` MusicBrainz requires, `musicbrainz-mcp-server/<version> ( <contact> )`, with `MUSICBRAINZ_CONTACT` as the contact
-- Entities are addressed by MBID (a hyphenated hexadecimal UUID, with any version/variant groups); uppercase and surrounding whitespace normalize to lowercase. Malformed/all-zero IDs fail before fetch as `invalid_mbid` (`invalid_link` for browse), while a well-shaped unknown ID remains `entity_not_found`
-- One process-wide limiter holds MusicBrainz calls to ~1 request/second, shared by every client of an instance, so long browse runs pace accordingly
-- Lookups fold discography, relationships, tracklists, and external links into one request; responses are cached (24 h by default), with retry and backoff on transient 5xx and HTML error pages
+- Entities are addressed by MBID (a hyphenated UUID); uppercase and surrounding whitespace are normalized. Malformed or all-zero IDs fail as `invalid_mbid` (`invalid_link` for browse); a well-formed unknown ID fails as `entity_not_found`
+- MusicBrainz calls are held to ~1 request/second across all clients of an instance, so long browse runs take a while
+- Lookups fold discography, relationships, tracklists, and external links into one request; responses are cached (24 h by default) and transient upstream errors are retried with backoff
 
 Agent-friendly output:
 
-- Artist release-groups and release-group editions embed one upstream page (25); browse enumerates the full entity set. Work recording relationships have a separate server-side cap of 25 with exact relationship counts and truthful disclosure. Artist/recording relationships and release tracklists are not subject to that slice; labels embed no releases
-- Provenance on search and browse: the effective query is echoed and the upstream total reported, so a partial window never reads as complete
+- Artist release-groups and release-group editions embed one page (25); browse returns the full set. Work recording relationships are capped at 25 with the exact count reported; labels embed no releases
+- Search and browse echo the effective query and report the upstream total, so a partial window never reads as complete
 - Discriminated outputs: `musicbrainz_lookup_identifier` returns a `kind`-tagged union, so callers branch on data, not string parsing
 - Raw upstream relevance `score`, not a derived confidence; missing upstream fields stay absent rather than invented
 
@@ -272,8 +272,8 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |:---|:---|:---|
-| `MUSICBRAINZ_CONTACT` | Contact (email or URL) sent in the `User-Agent`. Set your own on a shared or hosted instance so MusicBrainz can reach you about traffic. | repo URL |
-| `MUSICBRAINZ_BASE_URL` | MusicBrainz Web Service v2 base URL; override for a private mirror or beta. | `https://musicbrainz.org/ws/2` |
+| `MUSICBRAINZ_CONTACT` | Email or URL sent in the `User-Agent`; set your own on shared or hosted instances. | repo URL |
+| `MUSICBRAINZ_BASE_URL` | MusicBrainz Web Service v2 base URL (e.g. a private mirror). | `https://musicbrainz.org/ws/2` |
 | `MUSICBRAINZ_RATE_LIMIT_RPS` | Client-side requests-per-second ceiling (0.1–50). | `1` |
 | `MUSICBRAINZ_CACHE_TTL` | Response cache TTL in seconds; `0` disables caching. | `86400` |
 | `MUSICBRAINZ_TIMEOUT_MS` | Per-request HTTP timeout, in ms. | `30000` |
