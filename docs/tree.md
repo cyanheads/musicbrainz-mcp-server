@@ -1,6 +1,6 @@
 # musicbrainz-mcp-server - Directory Structure
 
-Generated on: 2026-10-13 14:36:02
+Generated on: 2026-10-23 05:14:42
 
 ```text
 musicbrainz-mcp-server/
@@ -146,6 +146,7 @@ musicbrainz-mcp-server/
 │   │   │       └── index.ts
 │   │   └── tools/
 │   │       └── definitions/
+│   │           ├── _pagination.ts
 │   │           ├── _shared.ts
 │   │           ├── browse-entities.tool.ts
 │   │           ├── get-artist.tool.ts
@@ -165,6 +166,7 @@ musicbrainz-mcp-server/
 │   │       ├── mbid.ts
 │   │       ├── musicbrainz-service.ts
 │   │       ├── rate-limiter.ts
+│   │       ├── release-appearances.ts
 │   │       ├── types.ts
 │   │       └── work-relations.ts
 │   └── index.ts
@@ -185,12 +187,17 @@ musicbrainz-mcp-server/
 │       ├── get-artist.test.ts
 │       ├── get-cover-art-verification.test.ts
 │       ├── get-cover-art.test.ts
+│       ├── get-recording.test.ts
 │       ├── get-release-group-cover-art.test.ts
 │       ├── get-release-group.test.ts
+│       ├── get-release.test.ts
 │       ├── get-work.test.ts
 │       ├── lookup-error-contract.test.ts
 │       ├── lookup-identifier.test.ts
 │       ├── mbid-input.test.ts
+│       ├── metadata-contract.test.ts
+│       ├── pagination.test.ts
+│       ├── query-wire.test.ts
 │       ├── search-entities.test.ts
 │       └── shared-rendering.test.ts
 ├── .dockerignore

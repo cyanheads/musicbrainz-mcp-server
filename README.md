@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.4-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -40,7 +40,7 @@ Open music metadata from MusicBrainz and the Cover Art Archive: artists, release
 | `musicbrainz_get_release_group` | Release-group (the album across its editions): types, first-release date, editions, cover-art availability |
 | `musicbrainz_get_release` | One edition: tracklist, label and catalog number, barcode, packaging |
 | `musicbrainz_get_recording` | Recording (one performance): length, ISRCs, releases it appears on, performer and production credits |
-| `musicbrainz_get_work` | Work (a composition): type, ISWCs, writers, and the recordings that perform it |
+| `musicbrainz_get_work` | Work (a composition): type, ISWCs, writers, movements, arrangements, and recordings |
 | `musicbrainz_get_label` | Label: type, life span, label code, external links |
 | `musicbrainz_lookup_identifier` | Resolve an ISRC, ISWC, or barcode to recordings, works, or releases |
 | `musicbrainz_browse_entities` | Page through every entity linked to a parent MBID |
@@ -58,7 +58,8 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 ### `musicbrainz_search_entities` <sub>tool</sub>
 
-- One `entityType` per call (`artist`, `release-group`, `release`, `recording`, `work`, `label`) and a Lucene `query` with field scoping (`artist:radiohead AND country:GB`); `limit` 1–100 (default 25), `offset` for paging
+- One `entityType` per call (`artist`, `release-group`, `release`, `recording`, `work`, `label`) and a Lucene `query` with field scoping (`artist:radiohead AND country:GB`); positive integer `limit` (default 25, values above 100 clamp to 100 with a notice), `offset` for paging
+- Returns the effective `offset` and upstream `totalCount`. Continuation uses `offset + rows returned`, including short pages. An empty page at or beyond a positive total reports exhaustion; an unexpectedly empty page before the total reports the discrepancy without suggesting a nonadvancing offset
 - Each hit carries `mbid`, `name`, and the raw 0–100 `score` in MusicBrainz order, plus type-specific fields such as `artistCredit`, `isrcs`, `iswcs`, and `length`. Release rows use `status` (Official, Bootleg, …); artist, release-group, work, and label subtypes use `type`. A whitespace-only query fails as `blank_query`
 
 ---
@@ -79,7 +80,8 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 ### `musicbrainz_get_release` <sub>tool</sub>
 
-- `mbid` only; returns `media` with tracks (`position`, `title`, `length` as m:ss, `recordingId`), `labelInfo` (label and `catalogNumber`), `barcode`, `status`, `date`, `country`, `packaging`, `language`/`script`, and `releaseGroupId`
+- `mbid`, `media_offset` (default 0), and `media_limit` (default 20, no maximum); returns ordered `media` with complete tracks per medium (`position`, `title`, `length` as m:ss, `recordingId`), `labelInfo` (label and `catalogNumber`), `barcode`, `status`, `date`, `country`, `packaging`, `language`/`script`, and `releaseGroupId`
+- `mediaTotal` and `trackTotal` count all normalized media and track occurrences; upstream per-medium `trackCount` is preserved. `mediaOffset` identifies the window. When more media remain, `truncated`, `shown`, `cap`, and a notice give the next `media_offset`; empty end pages report exhaustion. The release resource retains the complete raw tracklist
 - `coverArt` is the availability stub from the release record; call `musicbrainz_get_cover_art` for image URLs
 
 ---
@@ -87,15 +89,17 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 ### `musicbrainz_get_recording` <sub>tool</sub>
 
 - `mbid`, plus `inc_relationships` (default `true`) for performer, producer, and engineer credits, work links to the composition, and external links
-- Returns `length`, `isrcs`, `artistCredit`, `firstReleaseDate`, the `releases` it appears on, `relationships`, and `externalLinks`
+- Returns `length`, `isrcs`, `artistCredit`, `firstReleaseDate`, one upstream page of `releases` (up to 25), `relationships`, and `externalLinks`
+- `releaseAppearanceSummary` reports `shown`, `cap: 25`, and `completeness`: a short present page is `complete`, a full or absent page without an exact count is `unknown`, and an exact upstream count exceeding the returned page proves `truncated`. `totalCount` is omitted when unknown; no count request is added. Enumerate appearances with `musicbrainz_browse_entities` (`target_type=release`, `link.recording=<mbid>`, `offset=0`), because embedded and browse order may differ
 
 ---
 
 ### `musicbrainz_get_work` <sub>tool</sub>
 
-- `mbid`, plus `inc_relationships` (default `true`) for writer, composer, and lyricist credits, the recordings that perform it, and external links
+- `mbid`, plus `inc_relationships` (default `true`) for writer, composer, and lyricist credits, movements and arrangements, the recordings that perform it, and external links
 - Returns `type`, `languages`, `iswcs`, aliases, and tags. Only the first 25 recording relationships are kept (other relationships and links are all kept); `totalCount` gives the full count, and `truncated`, `shown`, and `cap` appear when some were cut
 - To list every recording of a work, browse `recording` by `work`, then call `musicbrainz_get_recording` for relationship attributes and dates
+- Follow a `relationships` entry with `targetType: "work"` using its `targetId` in another `musicbrainz_get_work` call. `direction` distinguishes parent/child links; optional `orderingKey` preserves the upstream sequence key (including zero), and `targetDisambiguation` distinguishes arrangements. Relationships retain upstream array order, which need not match movement order
 
 ---
 
@@ -109,22 +113,32 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 ### `musicbrainz_lookup_identifier` <sub>tool</sub>
 
 - `id_type` `isrc` → recordings, `iswc` → works, `barcode` → releases; a barcode is UPC/EAN digits and returns up to 25 ranked matches, each with a `score`
+- ISRC accepts compact `GBAYE9701274` or printed `GB-AYE-97-01274`, ignoring case and surrounding whitespace. ISWC accepts `T-010.140.236-1` or `T0101402361`, with optional group punctuation, ignoring whitespace and case. Results echo the canonical compact ISRC or `T-DDD.DDD.DDD-C` ISWC; malformed codes fail before a request
 - `result.kind` (`recordings` | `works` | `releases`) names the arm that came back; failures are `invalid_identifier` or `identifier_not_found`
 
 ---
 
 ### `musicbrainz_browse_entities` <sub>tool</sub>
 
-- `target_type` plus exactly one parent MBID in `link` (`artist`, `label`, `release-group`, `release`, `recording`, `work`, or `area`); `releaseGroup`/`release_group` are accepted for `release-group`. `limit` 1–100 (default 25), `offset` to any depth
-- Reports the upstream `totalCount`; while more remain, `truncated` is set and the notice gives the next `offset`. Release rows use `status`; other entities use `type`
+- `target_type` plus exactly one parent MBID in `link`; `releaseGroup`/`release_group` alias `release-group`. Positive integer `limit` defaults to 25; values above 100 clamp to 100 with a notice. Set `MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS=off` to enforce maximum 100 for both search and browse
+- Reports upstream `totalCount`; while more remain, `truncated` is set and a nonempty page gives the next `offset` using actual rows returned. Empty pages distinguish zero linked entities, exhaustion, and an unexpected empty page before the total. Clamp and paging guidance share one notice. Release rows use `status`; other entities use `type`
 - A missing, extra, or malformed link fails as `invalid_link`, an unknown parent as `entity_not_found`. For ordered tracks of an edition use `musicbrainz_get_release`
+
+| Target | Accepted parent keys |
+|:---|:---|
+| `artist` | `area`, `recording`, `release`, `release-group`, `work` |
+| `label` | `area`, `release` |
+| `release-group` | `artist`, `release` |
+| `release` | `area`, `artist`, `label`, `recording`, `release-group` |
+| `recording` | `artist`, `release`, `work` |
+| `work` | `artist` |
 
 ---
 
 ### `musicbrainz_get_cover_art` <sub>tool</sub>
 
-- `mbid` and `entity_type`: `release` (default) or `release-group`, which resolves to a `representativeRelease`
-- `images` with `front`/`back`, `types`, `imageUrl`, and 250/500/1200px thumbnails; an entity with no art returns an empty set and `hasArt: false`, not an error
+- `mbid` and `entity_type`: `release` (default) or `release-group`, which resolves to a `representativeRelease`; `limit` defaults to 25 and clamps above 100, and `offset` defaults to 0. These windows apply after the archive index is cached and are independent of the search/browse clamp setting
+- `images` retain archive order with `front`/`back`, `types`, `imageUrl`, and 250/500/1200px thumbnails. `totalCount` is exact, `offset` identifies the window, and `hasArt` reflects the full archive even on an empty end page. A single notice combines any clamp, continuation, exhaustion, or no-art guidance; `truncated`, `shown`, and `cap` appear when more images remain
 - An unknown MBID fails as `entity_not_found`; if MusicBrainz can't confirm the MBID exists, the empty set comes back with a notice saying so
 
 ---
@@ -133,7 +147,8 @@ Every entity is also reachable through the `get_*` tools, so tool-only clients l
 
 - `entity_type` is `artist`, `release-group`, `release`, `recording`, `work`, or `label`; returns the raw MusicBrainz record as `application/json`
 - Fetches the same default linked data as the matching `get_*` tool; failures are `invalid_mbid` and `entity_not_found`
-- Work JSON keeps the first 25 recording relationships; `recordingRelationshipSummary` gives the exact count and whether any were cut
+- Work JSON includes raw work-to-work relationships and keeps the first 25 recording relationships; `recordingRelationshipSummary` gives the exact recording count and whether any were cut
+- Recording JSON carries the same `releaseAppearanceSummary` as the recording tool without changing cached raw data. Release JSON retains every medium and track; the tool's media window does not apply to resources
 
 ## Features
 
@@ -148,8 +163,8 @@ MusicBrainz-specific:
 
 Agent-friendly output:
 
-- Artist release-groups and release-group editions embed one page (25); browse returns the full set. Work recording relationships are capped at 25 with the exact count reported; labels embed no releases
-- Search and browse echo the effective query and report the upstream total, so a partial window never reads as complete
+- Artist release-groups, release-group editions, and recording release appearances embed one page (25); browse enumerates the full set. Recording appearances disclose completeness without a count request. Work recording relationships are capped at 25 with the exact count reported; labels embed no releases
+- Search echoes the effective query; search and browse report the exact upstream total. Missing or invalid totals fail as malformed upstream responses instead of inventing a count
 - Discriminated outputs: `musicbrainz_lookup_identifier` returns a `kind`-tagged union, so callers branch on data, not string parsing
 - Raw upstream relevance `score`, not a derived confidence; missing upstream fields stay absent rather than invented
 
@@ -278,6 +293,7 @@ cp .env.example .env
 | `MUSICBRAINZ_CACHE_TTL` | Response cache TTL in seconds; `0` disables caching. | `86400` |
 | `MUSICBRAINZ_TIMEOUT_MS` | Per-request HTTP timeout, in ms. | `30000` |
 | `MUSICBRAINZ_MAX_RETRIES` | Retry attempts for transient upstream failures. | `3` |
+| `MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS` | Clamp search/browse limits above 100 with a notice; `off` restores maximum-100 schema validation. Strict boolean (`true`/`false`, `on`/`off`, `1`/`0`, `yes`/`no`). | `true` |
 | `COVER_ART_BASE_URL` | Cover Art Archive base URL. | `https://coverartarchive.org` |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | HTTP server port. | `3010` |
