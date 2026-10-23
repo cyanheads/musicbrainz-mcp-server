@@ -24,7 +24,8 @@
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_AUTH_MODE": "none",
         "NODE_ENV": "production",
-        "MUSICBRAINZ_CONTACT": "${user_config.musicbrainz_contact}"
+        "MUSICBRAINZ_CONTACT": "${user_config.musicbrainz_contact}",
+        "MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS": "${user_config.clamp_oversized_limits}"
       }
     }
   },
@@ -34,6 +35,13 @@
   "tools_generated": true,
   "prompts_generated": true,
   "user_config": {
+    "clamp_oversized_limits": {
+      "type": "boolean",
+      "title": "Clamp Oversized Limits",
+      "description": "Clamp search/browse page limits above 100 with a notice. Disable to enforce maximum 100.",
+      "required": false,
+      "default": true
+    },
     "musicbrainz_contact": {
       "type": "string",
       "title": "MusicBrainz Contact",

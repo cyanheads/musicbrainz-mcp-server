@@ -1,6 +1,6 @@
 /**
- * @fileoverview musicbrainz_get_release — one edition's full detail by MBID:
- * tracklist (media → tracks → recordings with lengths and MBIDs), label + catalog
+ * @fileoverview musicbrainz_get_release — one edition's detail by MBID:
+ * paged media (tracks → recordings with lengths and MBIDs), label + catalog
  * number, barcode, country, release date, format, packaging, text representation,
  * and a cover-art availability stub.
  * @module mcp-server/tools/definitions/get-release.tool
@@ -80,7 +80,7 @@ const LabelInfoSchema = z
 export const getReleaseTool = tool('musicbrainz_get_release', {
   title: 'musicbrainz-mcp-server: get release',
   description:
-    "One edition's full detail by MBID: the tracklist (media → tracks → recordings with lengths and recording MBIDs), label + catalog number, barcode, country, release date, format, packaging, text representation (language/script), and a cover-art availability stub. Track lengths are rendered m:ss (stored as milliseconds upstream). For the actual cover image URLs, call musicbrainz_get_cover_art with this release MBID.",
+    'One edition by MBID: ordered media with tracks, lengths and recording MBIDs, label + catalog number, barcode, country, release date, packaging, text representation, and a cover-art availability stub. media_offset (default 0) and media_limit (default 20, no maximum) select whole media after normalization; mediaTotal and trackTotal describe the full release. Follow the notice to retrieve remaining media. The release resource retains the complete raw tracklist. Track lengths are m:ss. For image URLs, call musicbrainz_get_cover_art.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -103,6 +103,18 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
     mbid: MbidInput.describe(
       'Release MBID (hyphenated hexadecimal UUID; surrounding whitespace and uppercase accepted).',
     ),
+    media_offset: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe('Zero-based medium offset in release order (default 0).'),
+    media_limit: z
+      .number()
+      .int()
+      .min(1)
+      .default(20)
+      .describe('Maximum whole media returned (default 20; no upper bound).'),
   }),
 
   output: z.object({
@@ -141,11 +153,29 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
         'Parent release-group MBID — chain to musicbrainz_get_release_group. Omitted when absent.',
       ),
     labelInfo: z.array(LabelInfoSchema).describe('Label / catalog-number pairings (may be empty).'),
-    media: z.array(MediumSchema).describe('Media (discs) with their tracklists (may be empty).'),
+    mediaOffset: z.number().describe('Effective zero-based medium offset.'),
+    mediaTotal: z.number().describe('Exact number of media in the whole normalized release.'),
+    trackTotal: z
+      .number()
+      .describe(
+        'Exact number of track occurrences in the whole normalized release, independent of upstream trackCount.',
+      ),
+    media: z
+      .array(MediumSchema)
+      .describe(
+        'Selected media in release order, with complete tracklists for each medium (may be empty).',
+      ),
     coverArt: CoverArtStubSchema.describe(
       'Whether cover art exists (availability stub from WS/2).',
     ),
   }),
+
+  enrichment: {
+    truncated: z.boolean().optional().describe('True when media remain after this nonempty page.'),
+    shown: z.number().optional().describe('Number of media returned when more remain.'),
+    cap: z.number().optional().describe('Requested media limit when more remain.'),
+    notice: z.string().optional().describe('Next media_offset, exhaustion, or no-media guidance.'),
+  },
 
   async handler(input, ctx) {
     ctx.log.info('musicbrainz_get_release', { mbid: input.mbid });
@@ -193,6 +223,23 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       ...(li['catalog-number'] ? { catalogNumber: li['catalog-number'] } : {}),
     }));
 
+    const mediaTotal = media.length;
+    const trackTotal = media.reduce((total, medium) => total + medium.tracks.length, 0);
+    const page = media.slice(input.media_offset, input.media_offset + input.media_limit);
+    const nextOffset = input.media_offset + page.length;
+    if (page.length > 0 && nextOffset < mediaTotal) {
+      ctx.enrich({ truncated: true, shown: page.length, cap: input.media_limit });
+      ctx.enrich.notice(
+        `Showing ${page.length} of ${mediaTotal} media at media_offset=${input.media_offset}. Continue with musicbrainz_get_release (mbid=${raw.id}, media_offset=${nextOffset}, media_limit=${input.media_limit}).`,
+      );
+    } else if (page.length === 0) {
+      ctx.enrich.notice(
+        mediaTotal === 0
+          ? 'No media are present in this release.'
+          : `Media page exhausted at media_offset=${input.media_offset}; this release has ${mediaTotal} media and ${trackTotal} tracks.`,
+      );
+    }
+
     return {
       mbid: raw.id,
       title: raw.title ?? '',
@@ -210,7 +257,10 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       ...(raw['text-representation']?.script ? { script: raw['text-representation'].script } : {}),
       ...(raw['release-group']?.id ? { releaseGroupId: raw['release-group'].id } : {}),
       labelInfo,
-      media,
+      mediaOffset: input.media_offset,
+      mediaTotal,
+      trackTotal,
+      media: page,
       coverArt: normalizeCoverArtStub(raw['cover-art-archive']),
     };
   },
@@ -242,6 +292,9 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       );
     }
     lines.push(...renderArtistCredits(result.artistCredit));
+    lines.push(
+      `**Tracklist:** ${result.mediaTotal} media, ${result.trackTotal} tracks (offset: ${result.mediaOffset}, shown: ${result.media.length})`,
+    );
     for (const m of result.media) {
       const trackCount = typeof m.trackCount === 'number' ? ` (${m.trackCount} tracks)` : '';
       lines.push(

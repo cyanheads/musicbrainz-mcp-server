@@ -22,6 +22,7 @@ import type {
   RawReleaseGroup,
   RawWork,
 } from '@/services/musicbrainz/types.js';
+import { applyPageLimit, PageLimit, pageNotice } from './_pagination.js';
 import { artistCreditString, formatDuration, normalizeArtistCredits, safeText } from './_shared.js';
 
 const ENTITY_TYPES = ['artist', 'release-group', 'release', 'recording', 'work', 'label'] as const;
@@ -165,18 +166,13 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
       .describe(
         'Lucene query string; must contain non-whitespace text. Plain text matches names/titles; field scoping (e.g. `artist:`, `country:`, `tag:`) is supported. Sent to MusicBrainz exactly as given.',
       ),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .default(25)
-      .describe('Maximum results to return (1–100).'),
+    limit: PageLimit,
     offset: z.number().int().min(0).default(0).describe('Result offset for pagination (0-based).'),
   }),
 
   output: z.object({
     entityType: z.string().describe('The entity type that was searched.'),
+    offset: z.number().describe('The effective zero-based result offset used for this page.'),
     results: z
       .array(ResultSchema)
       .describe('Ranked matches, in MusicBrainz score-descending order.'),
@@ -188,7 +184,9 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
     notice: z
       .string()
       .optional()
-      .describe('Guidance when zero results matched — how to broaden or correct the query.'),
+      .describe(
+        'Limit clamp and pagination guidance, including zero matches, exhausted pages, and empty-page discrepancies.',
+      ),
   },
 
   async handler(input, ctx) {
@@ -202,10 +200,11 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
       throw ctx.fail('blank_query', 'The search query is blank — it contains only whitespace.');
     }
     const service = getMusicBrainzService();
+    const limit = applyPageLimit(input.limit, 'musicbrainz_search_entities', ctx);
     const envelope = await service.search(
       input.entityType,
       input.query,
-      { limit: input.limit, offset: input.offset },
+      { limit, offset: input.offset },
       ctx,
       { signal: ctx.signal },
     );
@@ -215,20 +214,26 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
     const results = rawHits.map((h) => mapHit(input.entityType, h));
 
     ctx.enrich.echo(input.query);
-    ctx.enrich.total(typeof envelope.count === 'number' ? envelope.count : results.length);
-    if (results.length === 0) {
-      ctx.enrich.notice(
-        `No ${input.entityType} matched "${input.query}". Broaden the query, check spelling, or try a different entityType.`,
-      );
-    }
+    const total = envelope.count;
+    ctx.enrich.total(total);
+    const notice = pageNotice(
+      total,
+      input.offset,
+      results.length,
+      input.limit,
+      limit,
+      `No ${input.entityType} matched "${input.query}". Broaden the query, check spelling, or try a different entityType.`,
+    );
+    if (notice) ctx.enrich.notice(notice);
 
-    return { entityType: input.entityType, results };
+    return { entityType: input.entityType, offset: input.offset, results };
   },
 
   format: (result) => {
     const lines = [
       `## MusicBrainz ${result.entityType} search`,
       `**Matches:** ${result.results.length}`,
+      `**Offset:** ${result.offset}`,
     ];
     for (const r of result.results) {
       lines.push(

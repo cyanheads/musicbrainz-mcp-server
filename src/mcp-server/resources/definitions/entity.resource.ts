@@ -12,7 +12,8 @@ import { resource, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { MbidInput } from '@/mcp-server/tools/definitions/_shared.js';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
-import type { EntityType, RawRelation } from '@/services/musicbrainz/types.js';
+import { summarizeReleaseAppearances } from '@/services/musicbrainz/release-appearances.js';
+import type { EntityType, RawRecording, RawRelation } from '@/services/musicbrainz/types.js';
 import { sliceWorkRelations } from '@/services/musicbrainz/work-relations.js';
 
 /** Default `inc` sets per entity type — the useful slice the get_* tools fetch. */
@@ -21,7 +22,7 @@ const DEFAULT_INC: Record<EntityType, string[]> = {
   'release-group': ['releases', 'artist-credits', 'tags', 'genres'],
   release: ['recordings', 'artist-credits', 'labels', 'release-groups'],
   recording: ['artist-credits', 'releases', 'isrcs', 'artist-rels', 'work-rels', 'url-rels'],
-  work: ['artist-rels', 'recording-rels', 'aliases', 'tags', 'genres', 'url-rels'],
+  work: ['artist-rels', 'work-rels', 'recording-rels', 'aliases', 'tags', 'genres', 'url-rels'],
   label: ['aliases', 'tags', 'genres', 'url-rels'],
 };
 
@@ -31,7 +32,7 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
   name: 'musicbrainz-entity',
   title: 'musicbrainz-mcp-server: entity',
   description:
-    'A MusicBrainz entity by type and MBID with default linked data. entity_type: artist, release-group, release, recording, work, label. Artist release-groups and release-group editions embed one upstream page; labels embed no releases. Work recording relationships are sliced to 25 with recordingRelationshipSummary inside the JSON (exact relationship total and actual truncation). All other relationships and release tracklists are preserved. Browse recording by work enumerates identities; musicbrainz_get_recording supplies work relationship attributes and dates.',
+    'A MusicBrainz entity by type and MBID with default linked data. entity_type: artist, release-group, release, recording, work, label. Artist release-groups, release-group editions and recording release appearances embed one upstream page; labels embed no releases. Recording JSON includes releaseAppearanceSummary (shown, cap, completeness, optional exact totalCount and browse guidance from offset 0). Work JSON includes raw movement/arrangement relationships with direction, ordering-key and target disambiguation when supplied. Work recording relationships are sliced to 25 with recordingRelationshipSummary (exact relationship total and actual truncation). All other relationships and complete release tracklists are preserved; release-tool media windows do not apply here. Browse recording by work enumerates identities; musicbrainz_get_recording supplies work relationship attributes and dates.',
   mimeType: 'application/json',
 
   errors: [
@@ -66,13 +67,16 @@ export const entityResource = resource('musicbrainz://{entity_type}/{mbid}', {
     });
     const service = getMusicBrainzService();
     try {
-      const raw = await service.lookup<Record<string, unknown>>(
+      const raw = await service.lookup<RawRecording & Record<string, unknown>>(
         params.entity_type,
         params.mbid,
         { inc: DEFAULT_INC[params.entity_type] },
         ctx,
         { signal: ctx.signal },
       );
+      if (params.entity_type === 'recording') {
+        return { ...raw, releaseAppearanceSummary: summarizeReleaseAppearances(raw) };
+      }
       if (params.entity_type !== 'work') return raw;
       const slice = sliceWorkRelations(raw.relations as RawRelation[] | undefined, String(raw.id));
       return { ...raw, relations: slice.relations, recordingRelationshipSummary: slice.summary };

@@ -35,6 +35,53 @@ afterEach(() => searchMock.mockReset());
 
 describe('search_entities', () => {
   it.each([
+    [0, 0, [], 'No artist matched'],
+    [7, 7, [], 'exhausted'],
+    [7, 9, [], 'exhausted'],
+    [7, 2, [], 'empty page'],
+    [7, 2, [{ id: 'one', name: 'One', score: 100 }], 'offset=3'],
+  ])('reports paging accurately for total %s offset %s', async (count, offset, artists, notice) => {
+    searchMock.mockResolvedValueOnce({ count, artists });
+    const result = await runToolContract(searchEntitiesTool, {
+      entityType: 'artist',
+      query: 'radiohead',
+      offset,
+    });
+    expect(result.structuredContent).toMatchObject({
+      offset,
+      totalCount: count,
+      notice: expect.stringContaining(notice),
+    });
+    expect(JSON.stringify(result.content)).toContain(notice);
+    expect(JSON.stringify(result.content)).toContain(`Offset:** ${offset}`);
+    if (artists.length === 0) expect(JSON.stringify(result.content)).not.toContain('continue');
+  });
+
+  it('clamps 101 before fetching and merges short-page guidance', async () => {
+    searchMock.mockResolvedValueOnce({
+      count: 200,
+      artists: [{ id: 'one', name: 'One', score: 100 }],
+    });
+    const result = await runToolContract(searchEntitiesTool, {
+      entityType: 'artist',
+      query: 'radiohead',
+      limit: 101,
+      offset: 4,
+    });
+    expect(result.structuredContent).toMatchObject({
+      notice: expect.stringContaining('Requested limit 101 was clamped to 100.'),
+    });
+    expect(JSON.stringify(result.content)).toContain('100');
+    expect(JSON.stringify(result.content)).toContain('offset=5');
+    expect(searchMock).toHaveBeenCalledWith(
+      'artist',
+      'radiohead',
+      { limit: 100, offset: 4 },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+  it.each([
     ['release', { status: 'Official' }, { status: 'Official' }],
     ['release', {}, {}],
     ['release-group', { 'primary-type': 'Album' }, { type: 'Album' }],
@@ -55,7 +102,15 @@ describe('search_entities', () => {
     });
     const result = await runToolContract(searchEntitiesTool, { entityType, query: 'name' });
     const row = (result.structuredContent as { results: object[] }).results[0];
-    expect(row).toMatchObject(expected);
+    expect(row).toEqual({
+      mbid: 'id',
+      name: entityType === 'artist' || entityType === 'label' ? 'Name' : 'Title',
+      score: 100,
+      ...(entityType === 'release' || entityType === 'release-group'
+        ? { artistCredit: 'Unknown artist' }
+        : {}),
+      ...expected,
+    });
     if (entityType === 'release') expect(row).not.toHaveProperty('type');
     if (!Object.hasOwn(fields, 'status')) expect(row).not.toHaveProperty('status');
     for (const value of Object.values(expected))

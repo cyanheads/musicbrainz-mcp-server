@@ -54,7 +54,7 @@ const ImageSchema = z
 export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
   title: 'musicbrainz-mcp-server: get cover art',
   description:
-    "Cover Art Archive images for a release or release-group MBID: front/back flags, image types, full-resolution URLs, and 250/500/1200px thumbnail URLs. Returns an empty image set (NOT an error) when the entity has no art — absence of art is information. An MBID that matches no release or release-group of the given entity_type fails with entity_not_found instead of an empty set. Art is served at the release level; a release-group MBID resolves to a representative release's art automatically. URLs are linked, never rehosted — image copyright stays with the rights holders (only MusicBrainz core metadata is CC0).",
+    "Cover Art Archive images for a release or release-group MBID: front/back flags, image types, full-resolution URLs, and 250/500/1200px thumbnail URLs. limit defaults to 25 and clamps above 100; offset defaults to 0. Pages retain archive order, totalCount counts all images, and hasArt describes the full archive even on an empty page. Follow the notice for the next offset. No art is a successful empty result; an unknown MBID fails with entity_not_found after a bounded MusicBrainz check. A release-group resolves to a representative release's art. URLs are linked, never rehosted; image copyright stays with rights holders.",
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -81,27 +81,50 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
       .enum(['release', 'release-group'])
       .default('release')
       .describe('Whether the MBID is a release (default) or a release-group.'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .default(25)
+      .describe(
+        'Maximum images returned (default 25; values above 100 clamp to 100 with a notice).',
+      ),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe('Zero-based image offset in archive order (default 0).'),
   }),
 
   output: z.object({
     mbid: z.string().describe('The MBID that was queried.'),
     entityType: z.string().describe('Whether the MBID was treated as a release or release-group.'),
+    offset: z.number().describe('Effective zero-based image offset in archive order.'),
     representativeRelease: z
       .string()
       .optional()
       .describe(
         'For a release-group query, the release MBID whose art was returned. Omitted for direct release queries.',
       ),
-    images: z.array(ImageSchema).describe('Cover-art images (empty when the entity has no art).'),
+    images: z
+      .array(ImageSchema)
+      .describe(
+        'Selected cover-art images in archive order (empty for no art or an exhausted page).',
+      ),
   }),
 
   enrichment: {
     hasArt: z.boolean().describe('Whether any cover art exists for this entity.'),
+    totalCount: z.number().describe('Exact image total before the limit and offset window.'),
+    truncated: z.boolean().optional().describe('True when images remain after this nonempty page.'),
+    shown: z.number().optional().describe('Images returned when more remain.'),
+    cap: z.number().optional().describe('Applied image limit when more remain.'),
     notice: z
       .string()
       .optional()
       .describe(
-        'Present when the entity has no art: states that no images exist, or — when the MBID could not be checked against MusicBrainz — that its existence is unconfirmed.',
+        'Combined limit clamp, continuation, exhausted page, or no-art/existence-unconfirmed guidance.',
       ),
   },
 
@@ -158,7 +181,9 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
       }
     }
 
-    const images = (raw.images ?? []).map((img) => ({
+    const totalCount = raw.images?.length ?? 0;
+    const limit = Math.min(input.limit, 100);
+    const images = (raw.images ?? []).slice(input.offset, input.offset + limit).map((img) => ({
       id: String(img.id ?? ''),
       front: img.front === true,
       back: img.back === true,
@@ -171,14 +196,29 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
       ...(img.comment ? { comment: img.comment } : {}),
     }));
 
-    ctx.enrich({ hasArt: images.length > 0 });
-    if (images.length === 0) {
-      ctx.enrich.notice(
+    ctx.enrich({ hasArt: totalCount > 0 });
+    ctx.enrich.total(totalCount);
+    const notices: string[] = [];
+    if (input.limit > limit)
+      notices.push(`Requested limit=${input.limit}; applied limit=${limit} (maximum 100).`);
+    const nextOffset = input.offset + images.length;
+    if (images.length > 0 && nextOffset < totalCount) {
+      ctx.enrich({ truncated: true, shown: images.length, cap: limit });
+      notices.push(
+        `Showing ${images.length} of ${totalCount} images at offset=${input.offset}. Continue with musicbrainz_get_cover_art (mbid=${input.mbid}, entity_type=${input.entity_type}, limit=${limit}, offset=${nextOffset}).`,
+      );
+    } else if (totalCount > 0 && images.length === 0) {
+      notices.push(
+        `Image page exhausted at offset=${input.offset}; ${totalCount} images exist for this entity.`,
+      );
+    } else if (totalCount === 0) {
+      notices.push(
         existenceConfirmed
           ? `No cover art exists for ${input.entity_type} ${input.mbid}. This is not an error — the Cover Art Archive simply has no images for it.`
           : `The Cover Art Archive has no images for ${input.entity_type} ${input.mbid}, but whether that MBID exists in MusicBrainz could not be confirmed (the check failed upstream). If the MBID may be wrong, verify it with musicbrainz_search_entities.`,
       );
     }
+    if (notices.length) ctx.enrich.notice(notices.join(' '));
 
     // The representative release MBID is the trailing path segment of the `release`
     // URL the CAA returns (present on release-group lookups after the 307 redirect).
@@ -187,6 +227,7 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
     return {
       mbid: input.mbid.trim().toLowerCase(),
       entityType: input.entity_type,
+      offset: input.offset,
       ...(input.entity_type === 'release-group' && representativeRelease
         ? { representativeRelease }
         : {}),
@@ -198,8 +239,9 @@ export const getCoverArtTool = tool('musicbrainz_get_cover_art', {
     const lines = [`## Cover art: ${result.entityType} ${result.mbid}`];
     if (result.representativeRelease)
       lines.push(`**Representative release:** ${result.representativeRelease}`);
+    lines.push(`**Image window:** offset: ${result.offset}, shown: ${result.images.length}`);
     if (result.images.length === 0) {
-      lines.push('', '_No cover art available for this entity._');
+      lines.push('', '_No cover art available in this image page; the page is empty._');
     } else {
       lines.push(`**Images:** ${result.images.length}`);
       for (const img of result.images) {

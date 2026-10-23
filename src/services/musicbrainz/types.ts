@@ -69,19 +69,20 @@ export interface RawArtistCredit {
  * `recording` | ...), so we model the common ones explicitly.
  */
 export interface RawRelation {
-  artist?: { id?: string; name?: string; disambiguation?: string };
+  artist?: { id?: string; name?: string; disambiguation?: string | null };
   attributes?: string[];
   begin?: string | null;
   direction?: string;
   end?: string | null;
   ended?: boolean | null;
-  label?: { id?: string; name?: string };
-  recording?: { id?: string; title?: string; disambiguation?: string };
+  label?: { id?: string; name?: string; disambiguation?: string | null };
+  'ordering-key'?: number | null;
+  recording?: { id?: string; title?: string; disambiguation?: string | null };
   'target-type'?: string;
   type?: string;
   'type-id'?: string;
   url?: { id?: string; resource?: string };
-  work?: { id?: string; title?: string; disambiguation?: string };
+  work?: { id?: string; title?: string; disambiguation?: string | null };
 }
 
 // ─── Raw entity payloads (lookup / search hits) ──────────────────────────────
@@ -194,6 +195,7 @@ export interface RawRecording {
   isrcs?: string[];
   length?: number | null;
   relations?: RawRelation[];
+  'release-count'?: number;
   releases?: RawRelease[];
   score?: number;
   title?: string;

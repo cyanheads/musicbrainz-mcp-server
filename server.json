@@ -22,6 +22,13 @@
       "version": "0.2.0",
       "environmentVariables": [
         {
+          "name": "MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS",
+          "description": "Clamp search/browse page limits above 100 with a notice; off restores maximum-100 validation.",
+          "format": "boolean",
+          "isRequired": false,
+          "default": "true"
+        },
+        {
           "name": "MUSICBRAINZ_CONTACT",
           "description": "Contact (email or URL) embedded in the mandatory descriptive MusicBrainz User-Agent. Not start-blocking — the server ships a default contact — but operators running a shared or hosted instance should set their own so MusicBrainz can reach them about traffic.",
           "format": "string",
@@ -46,6 +53,13 @@
       "runtimeHint": "npx",
       "version": "0.2.0",
       "environmentVariables": [
+        {
+          "name": "MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS",
+          "description": "Clamp search/browse page limits above 100 with a notice; off restores maximum-100 validation.",
+          "format": "boolean",
+          "isRequired": false,
+          "default": "true"
+        },
         {
           "name": "MCP_TRANSPORT_TYPE",
           "description": "Selects the HTTP transport.",

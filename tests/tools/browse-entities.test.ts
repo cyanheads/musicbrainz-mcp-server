@@ -2,7 +2,7 @@
  * @fileoverview Browse contract tests for parent keys, pagination, and entity fields.
  * @module tests/tools/browse-entities.test
  */
-import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,6 +20,102 @@ const MBID = 'b1392450-e666-3926-a536-22c65f834433';
 afterEach(() => browse.mockReset());
 
 describe('browse contract characterization', () => {
+  it.each([
+    [0, 0, [], 'No release entities'],
+    [7, 7, [], 'exhausted'],
+    [7, 9, [], 'exhausted'],
+    [7, 2, [], 'empty page'],
+    [7, 2, [{ id: MBID, title: 'Edition' }], 'offset=3'],
+  ])(
+    'reports paging accurately for total %s offset %s',
+    async (total, offset, releases, notice) => {
+      browse.mockResolvedValueOnce({ 'release-count': total, releases });
+      const result = await runToolContract(browseEntitiesTool, {
+        target_type: 'release',
+        link: { label: MBID },
+        offset,
+      });
+      expect(result.structuredContent).toMatchObject({
+        offset,
+        totalCount: total,
+        notice: expect.stringContaining(notice),
+      });
+      expect(JSON.stringify(result.content)).toContain(notice);
+      if (releases.length === 0) expect(JSON.stringify(result.content)).not.toContain('continue');
+    },
+  );
+  it('clamps 101 and merges short-page guidance', async () => {
+    browse.mockResolvedValueOnce({
+      'release-count': 200,
+      releases: [{ id: MBID, title: 'Edition' }],
+    });
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: 'release',
+      link: { label: MBID },
+      limit: 101,
+      offset: 4,
+    });
+    expect(result.structuredContent).toMatchObject({
+      notice: expect.stringContaining('101'),
+      cap: 100,
+    });
+    expect(JSON.stringify(result.content)).toContain('100');
+    expect(JSON.stringify(result.content)).toContain('offset=5');
+    expect(browse).toHaveBeenCalledWith(
+      'release',
+      { link: 'label', linkMbid: MBID, limit: 100, offset: 4 },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+  const parents = ['area', 'artist', 'label', 'recording', 'release', 'release-group', 'work'];
+  const pairs = {
+    artist: ['area', 'recording', 'release', 'release-group', 'work'],
+    label: ['area', 'release'],
+    'release-group': ['artist', 'release'],
+    release: ['area', 'artist', 'label', 'recording', 'release-group'],
+    recording: ['artist', 'release', 'work'],
+    work: ['artist'],
+  };
+  for (const target_type of [
+    'artist',
+    'label',
+    'release-group',
+    'release',
+    'recording',
+    'work',
+  ] as const) {
+    const accepted = pairs[target_type];
+    it.each(parents)(`validates ${target_type} by %s independently of MBID`, async (parent) => {
+      browse.mockResolvedValueOnce({ [`${target_type}-count`]: 0 });
+      const result = await runToolContract(browseEntitiesTool, {
+        target_type,
+        link: { [parent]: MBID },
+      });
+      if (accepted.includes(parent)) {
+        expect(result.isError).not.toBe(true);
+        expect(browse).toHaveBeenCalledOnce();
+      } else {
+        expect(result.structuredContent).toMatchObject({
+          error: { data: { reason: 'invalid_link' } },
+        });
+        expect(JSON.stringify(result.content)).toContain('Unsupported');
+        expect(browse).not.toHaveBeenCalled();
+      }
+    });
+  }
+  it('describes residual upstream domain rejection without blaming the UUID', async () => {
+    browse.mockRejectedValueOnce(
+      new McpError(JsonRpcErrorCode.ValidationError, 'HTTP 400', { status: 400 }),
+    );
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: 'release',
+      link: { label: MBID },
+    });
+    expect(result.structuredContent).toMatchObject({ error: { data: { reason: 'invalid_link' } } });
+    expect(JSON.stringify(result.content)).toContain('rejected');
+    expect(JSON.stringify(result.content)).not.toContain('Malformed');
+  });
   it.each([0, 2, 4, 6])('preserves upstream totals at offset %s', async (offset) => {
     const releases = offset < 4 ? [{ id: `${offset}`, title: 'Edition', status: 'Official' }] : [];
     browse.mockResolvedValueOnce({ 'release-count': 4, releases });

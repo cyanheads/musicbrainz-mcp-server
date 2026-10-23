@@ -17,6 +17,7 @@ const MB_ENV = [
   'MUSICBRAINZ_CACHE_TTL',
   'MUSICBRAINZ_TIMEOUT_MS',
   'MUSICBRAINZ_MAX_RETRIES',
+  'MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS',
 ] as const;
 
 const DEFAULT_CONTACT = 'https://github.com/cyanheads/musicbrainz-mcp-server';
@@ -39,6 +40,14 @@ afterEach(() => {
 });
 
 describe('getServerConfig', () => {
+  it.each(['false', 'off', '0', 'no'])('strictly disables clamping with %s', (value) => {
+    process.env.MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS = value;
+    expect(getServerConfig().clampOversizedLimits).toBe(false);
+  });
+  it('rejects a boolean typo instead of coercing truthiness', () => {
+    process.env.MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS = 'sometimes';
+    expect(() => getServerConfig()).toThrow(/MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS/);
+  });
   it('applies every documented default when nothing is set', () => {
     expect(getServerConfig()).toEqual({
       contact: DEFAULT_CONTACT,
@@ -48,6 +57,7 @@ describe('getServerConfig', () => {
       cacheTtlSeconds: 86_400,
       timeoutMs: 30_000,
       maxRetries: 3,
+      clampOversizedLimits: true,
     });
   });
 

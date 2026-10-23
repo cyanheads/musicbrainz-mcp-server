@@ -15,6 +15,12 @@ import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
+  clampOversizedLimits: z
+    .stringbool()
+    .default(true)
+    .describe(
+      'Clamp search/browse page limits above 100 with a notice; off restores maximum validation',
+    ),
   /**
    * Contact string (email or URL) embedded in the mandatory descriptive
    * User-Agent. MusicBrainz blocks requests without an application + contact
@@ -77,6 +83,7 @@ export function getServerConfig(): ServerConfig {
     cacheTtlSeconds: 'MUSICBRAINZ_CACHE_TTL',
     timeoutMs: 'MUSICBRAINZ_TIMEOUT_MS',
     maxRetries: 'MUSICBRAINZ_MAX_RETRIES',
+    clampOversizedLimits: 'MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS',
   });
   return _config;
 }

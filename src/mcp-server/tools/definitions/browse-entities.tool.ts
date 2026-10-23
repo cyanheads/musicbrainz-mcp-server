@@ -7,13 +7,13 @@
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
-import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { normalizeMbid } from '@/services/musicbrainz/mbid.js';
 import {
   getMusicBrainzService,
   MusicBrainzService,
 } from '@/services/musicbrainz/musicbrainz-service.js';
 import type {
-  BrowseEnvelope,
   BrowseLink,
   EntityType,
   RawArtist,
@@ -23,6 +23,7 @@ import type {
   RawReleaseGroup,
   RawWork,
 } from '@/services/musicbrainz/types.js';
+import { applyPageLimit, PageLimit, pageNotice } from './_pagination.js';
 import {
   artistCreditString,
   classifyMbidError,
@@ -34,14 +35,13 @@ import {
 
 const TARGET_TYPES = ['artist', 'release-group', 'release', 'recording', 'work', 'label'] as const;
 
-/** Maps the `{type}-count` envelope key for each entity type. */
-const COUNT_KEY: Record<EntityType, string> = {
-  artist: 'artist-count',
-  'release-group': 'release-group-count',
-  release: 'release-count',
-  recording: 'recording-count',
-  work: 'work-count',
-  label: 'label-count',
+const PARENTS: Record<EntityType, readonly BrowseLink[]> = {
+  artist: ['area', 'recording', 'release', 'release-group', 'work'],
+  label: ['area', 'release'],
+  'release-group': ['artist', 'release'],
+  release: ['area', 'artist', 'label', 'recording', 'release-group'],
+  recording: ['artist', 'release', 'work'],
+  work: ['artist'],
 };
 
 const EntityRefSchema = z
@@ -123,7 +123,7 @@ function mapEntity(type: EntityType, raw: unknown): z.infer<typeof EntityRefSche
 export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
   title: 'musicbrainz-mcp-server: browse entities',
   description:
-    'Paginate entities linked to one parent MBID: release-groups by artist; releases by artist, label, release-group, or recording; recordings by artist, work, or release; works by artist; artists/labels by area. Artist release-groups and release-group editions embed one upstream page in get_* lookups; use this tool for the complete entity set. Recording browse returns identities, not performance attributes/dates or ordered release tracks: use musicbrainz_get_recording for work relationships and musicbrainz_get_release for tracks. Provide exactly one valid parent link. offset pages to any depth; totalCount is the upstream entity total. Release rows carry status, other entity subtypes use type.',
+    'Paginate entities linked to one parent MBID. Accepted parents by target: artist → area, recording, release, release-group, work; label → area, release; release-group → artist, release; release → area, artist, label, recording, release-group; recording → artist, release, work; work → artist. Artist release-groups and release-group editions embed one upstream page in get_* lookups; use this tool for the complete entity set. Recording browse returns identities, not performance attributes/dates or ordered release tracks: use musicbrainz_get_recording for work relationships and musicbrainz_get_release for tracks. Provide exactly one valid parent link. offset pages to any depth; totalCount is the upstream entity total. Release rows carry status, other entity subtypes use type.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -132,7 +132,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       code: JsonRpcErrorCode.ValidationError,
       when: 'A parent key is unknown, aliases collide, not exactly one nonempty parent is supplied, or the MBID/parent combination is invalid.',
       recovery:
-        'Provide exactly one parent key: artist, label, release-group, release, recording, work, or area. releaseGroup and release_group alias release-group; never combine aliases. Supply a 36-character hexadecimal UUID MBID valid for target_type.',
+        'Provide exactly one parent key with a nonzero hexadecimal UUID MBID. Accepted parents by target: artist → area, recording, release, release-group, work; label → area, release; release-group → artist, release; release → area, artist, label, recording, release-group; recording → artist, release, work; work → artist. releaseGroup and release_group alias release-group; never combine aliases.',
     },
     {
       reason: 'entity_not_found',
@@ -155,7 +155,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
           'Parent release-group MBID (releases in this group).',
         ),
         release: MbidInput.optional().describe(
-          'Parent release MBID (recording entities in this edition, not ordered tracks).',
+          'Parent release MBID (artists, labels, release-groups, or recording entities in this edition; recordings are not ordered tracks).',
         ),
         releaseGroup: MbidInput.optional().describe(
           'Alias for release-group; use only one spelling.',
@@ -164,16 +164,20 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
           'Alias for release-group; use only one spelling.',
         ),
         recording: MbidInput.optional().describe(
-          'Parent recording MBID (releases containing this recording).',
+          'Parent recording MBID (artists or releases linked to this recording).',
         ),
-        work: MbidInput.optional().describe('Parent work MBID (recordings of this work).'),
-        area: MbidInput.optional().describe('Parent area MBID (artists/labels in this area).'),
+        work: MbidInput.optional().describe(
+          'Parent work MBID (artists or recordings linked to this work).',
+        ),
+        area: MbidInput.optional().describe(
+          'Parent area MBID (artists, labels, or releases in this area).',
+        ),
       })
       .catchall(z.unknown())
       .describe(
         'Exactly one parent MBID. The valid key depends on target_type (see the description).',
       ),
-    limit: z.number().int().min(1).max(100).default(25).describe('Page size (1–100).'),
+    limit: PageLimit,
     offset: z
       .number()
       .int()
@@ -265,20 +269,41 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       );
     }
     const [linkType, suppliedMbid] = first;
-    const linkMbid = suppliedMbid.trim().toLowerCase();
+    if (!PARENTS[input.target_type].includes(linkType)) {
+      throw ctx.fail(
+        'invalid_link',
+        `Unsupported browse pair: ${input.target_type} by ${linkType}. Accepted parents for ${input.target_type}: ${PARENTS[input.target_type].join(', ')}.`,
+      );
+    }
+    let linkMbid: string;
+    try {
+      linkMbid = normalizeMbid(suppliedMbid);
+    } catch (error: unknown) {
+      if (classifyMbidError(error) === 'invalid_mbid') {
+        throw ctx.fail(
+          'invalid_link',
+          'Malformed link MBID: supply a nonzero hyphenated hexadecimal UUID.',
+        );
+      }
+      throw error;
+    }
 
-    let envelope: BrowseEnvelope;
+    let envelope: Awaited<ReturnType<typeof service.browse>>;
+    const limit = applyPageLimit(input.limit, 'musicbrainz_browse_entities', ctx);
     try {
       envelope = await service.browse(
         input.target_type,
-        { link: linkType, linkMbid, limit: input.limit, offset: input.offset },
+        { link: linkType, linkMbid, limit, offset: input.offset },
         ctx,
         { signal: ctx.signal },
       );
     } catch (error: unknown) {
       const reason = classifyMbidError(error);
-      if (reason === 'invalid_mbid') {
-        throw ctx.fail('invalid_link', `Malformed link MBID "${linkMbid}".`);
+      if (error instanceof McpError && error.code === JsonRpcErrorCode.ValidationError) {
+        throw ctx.fail(
+          'invalid_link',
+          `MusicBrainz rejected the browse query ${input.target_type} by ${linkType}; verify the parent type and MBID.`,
+        );
       }
       if (reason === 'entity_not_found') {
         throw ctx.fail('entity_not_found', `No ${linkType} exists with MBID ${linkMbid}.`);
@@ -289,21 +314,20 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     const key = MusicBrainzService.pluralKey(input.target_type);
     const rawEntities = (envelope[key] ?? []) as unknown[];
     const entities = rawEntities.map((e) => mapEntity(input.target_type, e));
-    const totalCount = (envelope as Record<string, unknown>)[COUNT_KEY[input.target_type]] as
-      | number
-      | undefined;
-    const total = typeof totalCount === 'number' ? totalCount : input.offset + entities.length;
+    const total = envelope[`${input.target_type}-count`];
 
     ctx.enrich.total(total);
     const remaining = total - (input.offset + entities.length);
-    if (remaining > 0) {
-      ctx.enrich.truncated({ shown: entities.length, cap: input.limit });
-      ctx.enrich.notice(
-        `${remaining} more linked entit${remaining === 1 ? 'y' : 'ies'} remain. Call again with offset=${input.offset + entities.length} to continue paging.`,
-      );
-    } else if (entities.length === 0) {
-      ctx.enrich.notice(`No ${input.target_type} entities are linked to ${linkType} ${linkMbid}.`);
-    }
+    if (remaining > 0) ctx.enrich.truncated({ shown: entities.length, cap: limit });
+    const notice = pageNotice(
+      total,
+      input.offset,
+      entities.length,
+      input.limit,
+      limit,
+      `No ${input.target_type} entities are linked to ${linkType} ${linkMbid}.`,
+    );
+    if (notice) ctx.enrich.notice(notice);
 
     return {
       targetType: input.target_type,

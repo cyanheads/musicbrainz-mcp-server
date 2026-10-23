@@ -105,14 +105,19 @@ export class MusicBrainzService {
     params: SearchParams,
     ctx: Context,
     options?: CallOptions,
-  ): Promise<SearchEnvelope> {
+  ): Promise<SearchEnvelope & { count: number }> {
     const search = new URLSearchParams({
       query,
       limit: String(params.limit),
       offset: String(params.offset),
       fmt: 'json',
     });
-    return this.request<SearchEnvelope>(`/${type}?${search.toString()}`, ctx, options);
+    return this.request<SearchEnvelope & { count: number }>(
+      `/${type}?${search.toString()}`,
+      ctx,
+      options,
+      (envelope) => this.validateCount(envelope.count),
+    );
   }
 
   /** Look up one entity by MBID with the requested `inc` sub-resources folded in. */
@@ -130,12 +135,12 @@ export class MusicBrainzService {
   }
 
   /** Paginate the complete set of `target` entities linked to one parent MBID. */
-  async browse(
-    target: EntityType,
+  async browse<T extends EntityType>(
+    target: T,
     params: BrowseParams,
     ctx: Context,
     options?: CallOptions,
-  ): Promise<BrowseEnvelope> {
+  ): Promise<BrowseEnvelope & Record<`${T}-count`, number>> {
     const search = new URLSearchParams({
       [params.link]: normalizeMbid(params.linkMbid),
       limit: String(params.limit),
@@ -145,7 +150,30 @@ export class MusicBrainzService {
     if (target === 'release-group' || target === 'release' || target === 'recording') {
       search.set('inc', 'artist-credits');
     }
-    return await this.request<BrowseEnvelope>(`/${target}?${search.toString()}`, ctx, options);
+    return await this.request<BrowseEnvelope & Record<`${T}-count`, number>>(
+      `/${target}?${search.toString()}`,
+      ctx,
+      options,
+      (envelope) => this.validateCount(envelope[`${target}-count`]),
+    );
+  }
+
+  /** Require an exact upstream total only on search and browse responses. */
+  private validateCount(count: unknown): void {
+    if (
+      typeof count !== 'number' ||
+      !Number.isFinite(count) ||
+      !Number.isInteger(count) ||
+      count < 0
+    ) {
+      throw serviceUnavailable(
+        'MusicBrainz returned a malformed response: the total count must be a finite nonnegative integer.',
+        {
+          reason: 'musicbrainz_malformed_response',
+          recovery: { hint: 'Retry this query later; MusicBrainz returned an invalid total.' },
+        },
+      );
+    }
   }
 
   /**
@@ -180,7 +208,8 @@ export class MusicBrainzService {
 
   /**
    * Core request pipeline: cache check → rate-limited, retried fetch + parse →
-   * cache store. `path` is the full WS/2 path with query string (already
+   * endpoint validation → cache store. Malformed totals neither retry nor cache.
+   * `path` is the full WS/2 path with query string (already
    * `fmt=json`). `fetchWithTimeout` maps upstream HTTP 400 to `InvalidParams`,
    * but that code is reserved for malformed JSON-RPC parameter shape; this
    * service reclassifies the upstream domain rejection to `ValidationError`.
@@ -189,7 +218,12 @@ export class MusicBrainzService {
    * `options.maxRetries` tighten the configured per-attempt timeout and retry
    * count for this call only.
    */
-  private async request<T>(path: string, ctx: Context, options?: CallOptions): Promise<T> {
+  private async request<T>(
+    path: string,
+    ctx: Context,
+    options?: CallOptions,
+    validate?: (result: T) => void,
+  ): Promise<T> {
     const key = cacheKey('mb', path);
     if (this.cacheTtlSeconds > 0) {
       const cached = await ctx.state.get<T>(key);
@@ -234,6 +268,7 @@ export class MusicBrainzService {
       throw error;
     }
 
+    validate?.(result);
     if (this.cacheTtlSeconds > 0) {
       await ctx.state.set(key, result, { ttl: this.cacheTtlSeconds });
     }

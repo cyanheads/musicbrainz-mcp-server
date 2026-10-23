@@ -96,7 +96,7 @@ describe('MusicBrainzService', () => {
   it.each(['release-group', 'release', 'recording', 'artist', 'label', 'work'] as const)(
     'requests artist credits only for credited browse target %s',
     async (target) => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({}));
+      fetchMock.mockResolvedValueOnce(jsonResponse({ [`${target}-count`]: 0 }));
       await makeService().browse(
         target,
         { link: 'artist', linkMbid: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', limit: 25, offset: 0 },

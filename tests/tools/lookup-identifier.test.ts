@@ -34,6 +34,61 @@ afterEach(() => {
 });
 
 describe('lookup_identifier', () => {
+  it.each(['GBAYE9701274', 'gbaye9701274', ' GB-AYE-97-01274 '])(
+    'canonicalizes ISRC %s on both surfaces',
+    async (value) => {
+      resolveIsrcMock.mockResolvedValueOnce({
+        recordings: [{ id: 'rec1', title: 'Paranoid Android' }],
+      });
+      const result = await runToolContract(lookupIdentifierTool, { id_type: 'isrc', value });
+      expect(result.structuredContent).toMatchObject({
+        result: { kind: 'recordings', identifier: 'GBAYE9701274' },
+      });
+      expect(JSON.stringify(result.content)).toContain('GBAYE9701274');
+      expect(resolveIsrcMock).toHaveBeenCalledWith(
+        'GBAYE9701274',
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
+
+  it.each(['T-010.257.770-7', 'T0102577707', ' t010.257770.7 ', 'T-010257.7707'])(
+    'canonicalizes ISWC %s on both surfaces',
+    async (value) => {
+      resolveIswcMock.mockResolvedValueOnce({ works: [{ id: 'w1', title: 'Composition' }] });
+      const result = await runToolContract(lookupIdentifierTool, { id_type: 'iswc', value });
+      expect(result.structuredContent).toMatchObject({
+        result: { kind: 'works', identifier: 'T-010.257.770-7' },
+      });
+      expect(JSON.stringify(result.content)).toContain('T-010.257.770-7');
+      expect(resolveIswcMock).toHaveBeenCalledWith(
+        'T-010.257.770-7',
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
+
+  it.each([
+    ['isrc', 'G1AYE9701274'],
+    ['isrc', 'GB-AYE9701274'],
+    ['isrc', 'GBAYE970127'],
+    ['isrc', 'GBAY!9701274'],
+    ['iswc', 'T-01.0257.770-7'],
+    ['iswc', 'T-010.257.770--7'],
+    ['iswc', 'T010257770'],
+    ['iswc', 'T01025777077'],
+  ] as const)('rejects malformed %s %s before the service', async (id_type, value) => {
+    const result = await runToolContract(lookupIdentifierTool, { id_type, value });
+    expect(result.structuredContent).toMatchObject({
+      error: { data: { reason: 'invalid_identifier' } },
+    });
+    expect(JSON.stringify(result.content)).toContain('invalid_identifier');
+    expect(resolveIsrcMock).not.toHaveBeenCalled();
+    expect(resolveIswcMock).not.toHaveBeenCalled();
+  });
+
   it('resolves an ISRC to a recordings arm and surfaces the artist credit', async () => {
     // The ISRC endpoint is now requested with inc=artist-credits, so the
     // credit is populated rather than falling back to "Unknown artist".

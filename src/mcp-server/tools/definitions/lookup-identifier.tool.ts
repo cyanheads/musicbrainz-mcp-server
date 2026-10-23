@@ -79,9 +79,9 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
     {
       reason: 'invalid_identifier',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The ISRC/ISWC is malformed (the dedicated endpoint returns HTTP 400), or the barcode contains anything other than digits once spaces and hyphens are removed.',
+      when: 'The ISRC/ISWC fails its accepted grammar locally or the dedicated endpoint rejects it with HTTP 400, or the barcode contains anything other than digits once spaces and hyphens are removed.',
       recovery:
-        'ISRC is 12 chars (e.g. USRC17607839); ISWC is T- then three dot-separated 3-digit groups and a check digit, T-DDD.DDD.DDD-C (e.g. T-010.140.236-1); a barcode is the UPC/EAN digits only (e.g. 075678164125 — spaces and hyphens are ignored, wildcards are not accepted). Verify the format.',
+        'ISRC accepts CCXXXYYNNNNN or CC-XXX-YY-NNNNN (e.g. USRC17607839), ignoring case and surrounding whitespace. ISWC accepts T plus ten digits, with optional hyphen after T, optional dots between three-digit groups, and optional hyphen/dot before the check digit; whitespace and case are ignored (e.g. T-010.140.236-1 or T0101402361). A barcode is UPC/EAN digits (e.g. 075678164125 — spaces and hyphens ignored, wildcards rejected). Verify the format; check digits are not repaired.',
     },
   ],
 
@@ -93,8 +93,17 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       .string()
       .min(1)
       .describe(
-        'The identifier value. ISRC e.g. "USRC17607839"; ISWC e.g. "T-010.140.236-1"; barcode = the UPC/EAN digits, e.g. "075678164125" (spaces and hyphens are ignored; any other character, including a wildcard, is rejected).',
-      ),
+        'ISRC: compact CCXXXYYNNNNN or grouped CC-XXX-YY-NNNNN (e.g. GBAYE9701274 or GB-AYE-97-01274), case-insensitive with surrounding whitespace. ISWC: T plus ten digits, optional hyphen after T, optional dots between three-digit groups, optional hyphen/dot before the check digit (e.g. T-010.140.236-1 or T0101402361); whitespace and case are ignored. Echoes canonical uppercase ISRC or T-DDD.DDD.DDD-C ISWC. Barcode: UPC/EAN digits, e.g. 075678164125; spaces and hyphens are ignored, other characters rejected.',
+      )
+      .meta({
+        examples: [
+          'GBAYE9701274',
+          'GB-AYE-97-01274',
+          'T-010.140.236-1',
+          'T0101402361',
+          '075678164125',
+        ],
+      }),
   }),
 
   // The resolved entity type varies by id_type, so `result` is a discriminated
@@ -137,9 +146,14 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
     const service = getMusicBrainzService();
 
     if (input.id_type === 'isrc') {
+      const supplied = input.value.trim().toUpperCase();
+      if (!/^(?:[A-Z]{2}[A-Z0-9]{3}\d{7}|[A-Z]{2}-[A-Z0-9]{3}-\d{2}-\d{5})$/.test(supplied)) {
+        throw ctx.fail('invalid_identifier', 'ISRC must be CCXXXYYNNNNN or CC-XXX-YY-NNNNN.');
+      }
+      const identifier = supplied.replaceAll('-', '');
       let envelope: { recordings?: RawRecording[] };
       try {
-        envelope = await service.resolveIsrc(input.value, ctx, { signal: ctx.signal });
+        envelope = await service.resolveIsrc(identifier, ctx, { signal: ctx.signal });
       } catch (error: unknown) {
         const reason = classifyIdentifierError(error);
         if (reason === 'invalid_identifier')
@@ -163,13 +177,23 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       if (recordings.length === 0) {
         throw ctx.fail('identifier_not_found', `No recording carries ISRC ${input.value}.`);
       }
-      return { result: { kind: 'recordings' as const, identifier: input.value, recordings } };
+      return { result: { kind: 'recordings' as const, identifier, recordings } };
     }
 
     if (input.id_type === 'iswc') {
+      const groups = /^T-?(\d{3})\.?(\d{3})\.?(\d{3})[-.]?(\d)$/.exec(
+        input.value.replace(/\s/g, '').toUpperCase(),
+      );
+      if (!groups) {
+        throw ctx.fail(
+          'invalid_identifier',
+          'ISWC must be T plus ten digits with optional group punctuation, e.g. T-010.140.236-1.',
+        );
+      }
+      const identifier = `T-${groups[1]}.${groups[2]}.${groups[3]}-${groups[4]}`;
       let envelope: { works?: RawWork[] };
       try {
-        envelope = await service.resolveIswc(input.value, ctx, { signal: ctx.signal });
+        envelope = await service.resolveIswc(identifier, ctx, { signal: ctx.signal });
       } catch (error: unknown) {
         const reason = classifyIdentifierError(error);
         if (reason === 'invalid_identifier')
@@ -189,7 +213,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       if (works.length === 0) {
         throw ctx.fail('identifier_not_found', `No work carries ISWC ${input.value}.`);
       }
-      return { result: { kind: 'works' as const, identifier: input.value, works } };
+      return { result: { kind: 'works' as const, identifier, works } };
     }
 
     // barcode — Lucene search filter on releases (ranked, not a dedicated endpoint).

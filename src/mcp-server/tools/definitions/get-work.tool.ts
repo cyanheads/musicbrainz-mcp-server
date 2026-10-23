@@ -1,7 +1,7 @@
 /**
  * @fileoverview musicbrainz_get_work — work (a composition, the song as written,
  * distinct from any recording) by MBID: type, language(s), ISWCs, writer/composer/
- * lyricist relationships, and the recordings that perform it. The work lookup
+ * lyricist relationships, movements, arrangements, and the recordings that perform it. The work lookup
  * returns the first 25 recording relationships and every non-recording relation.
  * @module mcp-server/tools/definitions/get-work.tool
  */
@@ -32,7 +32,7 @@ import {
 export const getWorkTool = tool('musicbrainz_get_work', {
   title: 'musicbrainz-mcp-server: get work',
   description:
-    'Work (a composition, distinct from a recording) by MBID: type, languages, ISWCs, writers/composers/lyricists, aliases, tags, and external links. This server returns the first 25 recording relationships with their exact total and actual truncation disclosure, preserving all other relationships. Browse recording entities with musicbrainz_browse_entities (target_type=recording, link.work), then use musicbrainz_get_recording for work relationship attributes and dates; browse alone does not return those details.',
+    'Work (a composition, distinct from a recording) by MBID: type, languages, ISWCs, writers/composers/lyricists, movements, arrangements, aliases, tags, and external links. Follow work target MBIDs with this tool; direction, orderingKey, and targetDisambiguation distinguish parts and arrangements without reordering relationships. This server returns the first 25 recording relationships with their exact total and actual truncation disclosure, preserving all other relationships. Browse recording entities with musicbrainz_browse_entities (target_type=recording, link.work), then use musicbrainz_get_recording for work relationship attributes and dates; browse alone does not return those details.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -59,7 +59,7 @@ export const getWorkTool = tool('musicbrainz_get_work', {
       .boolean()
       .default(true)
       .describe(
-        'Include writer/composer relationships, recording relationships, and external links.',
+        'Include writer/composer, movement/arrangement and recording relationships, and external links.',
       ),
   }),
 
@@ -109,7 +109,7 @@ export const getWorkTool = tool('musicbrainz_get_work', {
     const service = getMusicBrainzService();
 
     const inc = ['aliases', 'tags', 'genres'];
-    if (input.inc_relationships) inc.push('artist-rels', 'recording-rels', 'url-rels');
+    if (input.inc_relationships) inc.push('artist-rels', 'work-rels', 'recording-rels', 'url-rels');
 
     let raw: RawWork;
     try {

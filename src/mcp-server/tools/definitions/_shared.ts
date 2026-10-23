@@ -129,6 +129,16 @@ export const RelationSchema = z
       .string()
       .optional()
       .describe('Name/title of the related entity. Omitted when absent.'),
+    targetDisambiguation: z
+      .string()
+      .optional()
+      .describe('Qualifier distinguishing the related entity from namesakes. Omitted when absent.'),
+    orderingKey: z
+      .number()
+      .optional()
+      .describe(
+        'Upstream relationship sequence key, including zero. Omitted when unknown; array order is preserved.',
+      ),
     begin: z.string().optional().describe('Relationship start date. Omitted when absent.'),
     end: z.string().optional().describe('Relationship end date. Omitted when absent.'),
   })
@@ -176,7 +186,7 @@ export function normalizeArtistCredits(
   for (const c of credits) {
     const artistId = c.artist?.id;
     if (!artistId) continue;
-    const joinPhrase = c.joinphrase?.trim();
+    const joinPhrase = c.joinphrase;
     out.push({
       name: c.name ?? c.artist?.name ?? '',
       artistId,
@@ -189,7 +199,7 @@ export function normalizeArtistCredits(
 
 /** Render an artist-credit array to its display string, stitching join phrases. */
 export function artistCreditString(credits: z.infer<typeof ArtistCreditSchema>[]): string {
-  return credits.map((c) => `${c.artistName}${c.joinPhrase ?? ''}`).join('') || 'Unknown artist';
+  return credits.map((c) => `${c.name}${c.joinPhrase ?? ''}`).join('') || 'Unknown artist';
 }
 
 /**
@@ -202,8 +212,8 @@ export function renderArtistCredits(credits: z.infer<typeof ArtistCreditSchema>[
   const lines = ['', '### Artist credit'];
   for (const c of credits) {
     const credited =
-      c.name && c.name !== c.artistName ? ` (credited as "${safeText(c.name)}")` : '';
-    const join = c.joinPhrase ? ` + join "${safeText(c.joinPhrase)}"` : '';
+      c.name && c.name !== c.artistName ? ` (credited as ${safeText(`"${c.name}"`)})` : '';
+    const join = c.joinPhrase ? ` + join ${safeText(`"${c.joinPhrase}"`)}` : '';
     lines.push(`- ${safeText(c.artistName)}${credited} — ${c.artistId}${join}`);
   }
   return lines;
@@ -245,27 +255,31 @@ export function normalizeAliases(aliases: RawAlias[] | undefined): z.infer<typeo
 }
 
 /** The MBID-bearing target nested in a relation, by target-type. */
-function relationTarget(rel: RawRelation): { id?: string; name?: string } {
+function relationTarget(rel: RawRelation): { id?: string; name?: string; disambiguation?: string } {
   switch (rel['target-type']) {
     case 'artist':
       return {
         ...(rel.artist?.id && { id: rel.artist.id }),
         ...(rel.artist?.name && { name: rel.artist.name }),
+        ...(rel.artist?.disambiguation && { disambiguation: rel.artist.disambiguation }),
       };
     case 'work':
       return {
         ...(rel.work?.id && { id: rel.work.id }),
         ...(rel.work?.title && { name: rel.work.title }),
+        ...(rel.work?.disambiguation && { disambiguation: rel.work.disambiguation }),
       };
     case 'recording':
       return {
         ...(rel.recording?.id && { id: rel.recording.id }),
         ...(rel.recording?.title && { name: rel.recording.title }),
+        ...(rel.recording?.disambiguation && { disambiguation: rel.recording.disambiguation }),
       };
     case 'label':
       return {
         ...(rel.label?.id && { id: rel.label.id }),
         ...(rel.label?.name && { name: rel.label.name }),
+        ...(rel.label?.disambiguation && { disambiguation: rel.label.disambiguation }),
       };
     default:
       return {};
@@ -301,6 +315,8 @@ export function normalizeRelations(relations: RawRelation[] | undefined): {
       targetType: rel['target-type'] ?? 'unknown',
       ...(target.id ? { targetId: target.id } : {}),
       ...(target.name ? { targetName: target.name } : {}),
+      ...(target.disambiguation ? { targetDisambiguation: target.disambiguation } : {}),
+      ...(typeof rel['ordering-key'] === 'number' ? { orderingKey: rel['ordering-key'] } : {}),
       ...(rel.begin ? { begin: rel.begin } : {}),
       ...(rel.end ? { end: rel.end } : {}),
     });
@@ -366,8 +382,10 @@ export function renderRelationships(rels: z.infer<typeof RelationSchema>[]): str
     const target = safeText(r.targetName ?? r.targetId ?? r.targetType);
     const dir = r.direction ? ` ${r.direction}` : '';
     const dates = r.begin || r.end ? ` [${r.begin ?? ''}${r.end ? `–${r.end}` : ''}]` : '';
+    const qualifier = r.targetDisambiguation ? ` — ${safeText(r.targetDisambiguation)}` : '';
+    const ordering = typeof r.orderingKey === 'number' ? ` [ordering key: ${r.orderingKey}]` : '';
     lines.push(
-      `- **${safeText(r.type)}**${attrs}${dir} → ${r.targetType}: ${target}${r.targetId ? ` (${r.targetId})` : ''}${dates}`,
+      `- **${safeText(r.type)}**${attrs}${dir} → ${r.targetType}: ${target}${r.targetId ? ` (${r.targetId})` : ''}${qualifier}${dates}${ordering}`,
     );
   }
   return lines;
@@ -392,7 +410,7 @@ export function renderAliases(aliases: z.infer<typeof AliasSchema>[]): string | 
       a.type ? safeText(a.type) : null,
       a.locale ? safeText(a.locale) : null,
       a.sortName && a.sortName !== a.name ? `sort: ${safeText(a.sortName)}` : null,
-      a.primary ? 'primary' : null,
+      typeof a.primary === 'boolean' ? `primary: ${a.primary ? 'yes' : 'no'}` : null,
     ]
       .filter(Boolean)
       .join(', ');

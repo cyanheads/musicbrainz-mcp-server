@@ -34,6 +34,9 @@ import {
 const STATUS_BY_MARKER: Record<string, number> = { bad: 400, missing: 404, down: 503 };
 
 function statusFor(url: string): number {
+  if (url.includes('GBBAD9701274') || url.includes('T-000.000.001-1')) return 400;
+  if (url.includes('GBMIS9701274') || url.includes('T-000.000.002-2')) return 404;
+  if (url.includes('GBDWN9701274') || url.includes('T-000.000.003-3')) return 503;
   if (url.includes('33333333-3333-4333-8333-333333333333')) return 400;
   if (url.includes('11111111-1111-4111-8111-111111111111')) return 404;
   if (url.includes('22222222-2222-4222-8222-222222222222')) return 503;
@@ -165,10 +168,10 @@ describe('musicbrainz_lookup_identifier — ISRC/ISWC endpoint status → declar
   }[];
 
   it.each([
-    ['isrc', '400', 'invalid_identifier', JsonRpcErrorCode.ValidationError, 'XX-bad-0000001'],
-    ['isrc', '404', 'identifier_not_found', JsonRpcErrorCode.NotFound, 'XX-missing-0001'],
-    ['iswc', '400', 'invalid_identifier', JsonRpcErrorCode.ValidationError, 'T-bad-000.000-0'],
-    ['iswc', '404', 'identifier_not_found', JsonRpcErrorCode.NotFound, 'T-missing-000-0'],
+    ['isrc', '400', 'invalid_identifier', JsonRpcErrorCode.ValidationError, 'GBBAD9701274'],
+    ['isrc', '404', 'identifier_not_found', JsonRpcErrorCode.NotFound, 'GBMIS9701274'],
+    ['iswc', '400', 'invalid_identifier', JsonRpcErrorCode.ValidationError, 'T-000.000.001-1'],
+    ['iswc', '404', 'identifier_not_found', JsonRpcErrorCode.NotFound, 'T-000.000.002-2'],
   ] as const)('%s: maps an upstream %s to %s', async (idType, _status, reason, code, value) => {
     const result = await runToolContract(lookupIdentifierTool, { id_type: idType, value });
     const contract = entry(errors, reason);
@@ -191,7 +194,7 @@ describe('musicbrainz_lookup_identifier — ISRC/ISWC endpoint status → declar
     async (idType) => {
       const result = await runToolContract(lookupIdentifierTool, {
         id_type: idType,
-        value: 'X-down-000',
+        value: idType === 'isrc' ? 'GBDWN9701274' : 'T-000.000.003-3',
       });
 
       expect(result.isError).toBe(true);

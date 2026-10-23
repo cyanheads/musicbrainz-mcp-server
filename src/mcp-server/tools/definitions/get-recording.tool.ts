@@ -9,6 +9,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
+import { summarizeReleaseAppearances } from '@/services/musicbrainz/release-appearances.js';
 import type { RawRecording } from '@/services/musicbrainz/types.js';
 import {
   ArtistCreditSchema,
@@ -39,7 +40,7 @@ const ReleaseAppearanceSchema = z
 export const getRecordingTool = tool('musicbrainz_get_recording', {
   title: 'musicbrainz-mcp-server: get recording',
   description:
-    'Recording (a specific performance, distinct from the abstract work) by MBID: length, artist credits, ISRCs, release appearances, work relationships, and performer/production credits with attributes and dates. Relationships are not capped. Browse release appearances with musicbrainz_browse_entities (target_type=release, link.recording). Browse recording by work enumerates recording entities; this tool supplies their work relationship details.',
+    'Recording (a specific performance, distinct from the abstract work) by MBID: length, artist credits, ISRCs, one upstream page of release appearances with completeness metadata, work relationships, and performer/production credits with attributes and dates. Relationships are not capped. Enumerate releases with musicbrainz_browse_entities (target_type=release, link.recording, offset=0); embedded and browse order may differ. Browse recording by work enumerates recording entities; this tool supplies their work relationship details.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -86,7 +87,29 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
       .describe('Earliest release date for this recording. Omitted when absent.'),
     releases: z
       .array(ReleaseAppearanceSchema)
-      .describe('Releases this recording appears on (may be empty).'),
+      .describe(
+        'One upstream page of release appearances (up to 25; may be empty). See releaseAppearanceSummary for completeness.',
+      ),
+    releaseAppearanceSummary: z
+      .object({
+        shown: z.number().describe('Release appearances returned in the embedded page.'),
+        cap: z.number().describe('Upstream embedded page size (25).'),
+        completeness: z
+          .enum(['complete', 'unknown', 'truncated'])
+          .describe(
+            'Complete for a short present page or exact total; unknown without proof; truncated only when the exact total exceeds shown.',
+          ),
+        totalCount: z
+          .number()
+          .optional()
+          .describe(
+            'Exact release total from upstream or a short present page. Omitted when unknown.',
+          ),
+        notice: z
+          .string()
+          .describe('Browse guidance starting at offset 0, independent of embedded order.'),
+      })
+      .describe('Completeness evidence derived only from this recording lookup.'),
     relationships: z
       .array(RelationSchema)
       .describe('Performance/production relationships and work-rels (may be empty).'),
@@ -136,6 +159,7 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
       isrcs: raw.isrcs ?? [],
       ...(raw['first-release-date'] ? { firstReleaseDate: raw['first-release-date'] } : {}),
       releases,
+      releaseAppearanceSummary: summarizeReleaseAppearances(raw),
       relationships,
       externalLinks,
     };
@@ -151,6 +175,11 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
     if (result.firstReleaseDate) lines.push(`**First release:** ${result.firstReleaseDate}`);
     if (result.isrcs.length) lines.push(`**ISRCs:** ${result.isrcs.join(', ')}`);
     lines.push(...renderArtistCredits(result.artistCredit));
+    const summary = result.releaseAppearanceSummary;
+    lines.push(
+      `**Release appearances:** ${summary.completeness} (shown: ${summary.shown}, cap: ${summary.cap}${summary.totalCount === undefined ? '' : `, totalCount: ${summary.totalCount}`})`,
+    );
+    lines.push(summary.notice);
     if (result.releases.length) {
       lines.push('', `### Appears on (${result.releases.length})`);
       for (const r of result.releases) {
