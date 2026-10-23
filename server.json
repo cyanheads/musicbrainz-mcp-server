@@ -6,7 +6,7 @@
     "url": "https://github.com/cyanheads/musicbrainz-mcp-server",
     "source": "github"
   },
-  "version": "0.2.0",
+  "version": "0.2.1",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/musicbrainz-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "environmentVariables": [
         {
           "name": "MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS",
@@ -51,7 +51,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/musicbrainz-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "environmentVariables": [
         {
           "name": "MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS",

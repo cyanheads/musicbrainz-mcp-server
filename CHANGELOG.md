@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-10-22
+
+Music metadata fidelity and paged detail
+
 ## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-10-13 · ⚠️ Breaking
 
 Bound work recording relationships and correct browse contracts.
