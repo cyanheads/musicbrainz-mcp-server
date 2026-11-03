@@ -1,6 +1,6 @@
 /**
  * @fileoverview musicbrainz_get_work — work (a composition, the song as written,
- * distinct from any recording) by MBID: type, language(s), ISWCs, writer/composer/
+ * distinct from any recording) by MBID: type, language(s), ISWCs, work attributes, writer/composer/
  * lyricist relationships, movements, arrangements, and the recordings that perform it. The work lookup
  * returns the first 25 recording relationships and every non-recording relation.
  * @module mcp-server/tools/definitions/get-work.tool
@@ -32,7 +32,7 @@ import {
 export const getWorkTool = tool('musicbrainz_get_work', {
   title: 'musicbrainz-mcp-server: get work',
   description:
-    'Work (a composition, distinct from a recording) by MBID: type, languages, ISWCs, writers/composers/lyricists, movements, arrangements, aliases, tags, and external links. Follow work target MBIDs with this tool; direction, orderingKey, and targetDisambiguation distinguish parts and arrangements without reordering relationships. This server returns the first 25 recording relationships with their exact total and actual truncation disclosure, preserving all other relationships. Browse recording entities with musicbrainz_browse_entities (target_type=recording, link.work), then use musicbrainz_get_recording for work relationship attributes and dates; browse alone does not return those details.',
+    'Work (a composition, distinct from a recording) by MBID: type, languages, ISWCs, ordered work attributes (rights-society registrations, musical key and other metadata), writers/composers/lyricists, movements, arrangements, aliases, tags, and external links. Attributes remain available when relationships are disabled. Follow work target MBIDs with this tool; direction, orderingKey, and targetDisambiguation distinguish parts and arrangements without reordering relationships. This server returns the first 25 recording relationships with their exact total and actual truncation disclosure, preserving all other relationships. Browse recording entities with musicbrainz_browse_entities (target_type=recording, link.work), then use musicbrainz_get_recording for work relationship attributes and dates; browse alone does not return those details.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -70,6 +70,26 @@ export const getWorkTool = tool('musicbrainz_get_work', {
     type: z.string().optional().describe('Work type (Song, Symphony, …). Omitted when unknown.'),
     languages: z.array(z.string()).describe('Lyrics languages (ISO codes; may be empty).'),
     iswcs: z.array(z.string()).describe('ISWCs assigned to this work (may be empty).'),
+    attributes: z
+      .array(
+        z
+          .object({
+            type: z
+              .string()
+              .optional()
+              .describe(
+                'Attribute type, such as a rights society or musical key. Omitted when unknown.',
+              ),
+            value: z
+              .string()
+              .optional()
+              .describe(
+                'Exact attribute value, preserving spaces and leading zeros. Omitted when unknown.',
+              ),
+          })
+          .describe('One work attribute; known members of sparse rows are preserved.'),
+      )
+      .describe('Work attributes in upstream order, including repeated types (may be empty).'),
     aliases: z.array(AliasSchema).describe('Alternate titles (may be empty).'),
     tags: z.array(TagSchema).describe('Community tags/genres (may be empty).'),
     relationships: z
@@ -135,6 +155,10 @@ export const getWorkTool = tool('musicbrainz_get_work', {
       ...(raw.type ? { type: raw.type } : {}),
       languages,
       iswcs: raw.iswcs ?? [],
+      attributes: (raw.attributes ?? []).map((attribute) => ({
+        ...(typeof attribute.type === 'string' ? { type: attribute.type } : {}),
+        ...(typeof attribute.value === 'string' ? { value: attribute.value } : {}),
+      })),
       aliases: normalizeAliases(raw.aliases),
       tags: normalizeTags(raw.tags ?? raw.genres),
       relationships,
@@ -150,6 +174,18 @@ export const getWorkTool = tool('musicbrainz_get_work', {
     if (result.type) lines.push(`**Type:** ${safeText(result.type)}`);
     if (result.languages.length) lines.push(`**Languages:** ${result.languages.join(', ')}`);
     if (result.iswcs.length) lines.push(`**ISWCs:** ${result.iswcs.join(', ')}`);
+    if (result.attributes.length) {
+      lines.push('', '### Attributes');
+      for (const attribute of result.attributes) {
+        const members = [
+          attribute.type === undefined ? undefined : `type: ${safeText(`"${attribute.type}"`)}`,
+          attribute.value === undefined ? undefined : `value: ${safeText(`"${attribute.value}"`)}`,
+        ].filter((member) => member !== undefined);
+        lines.push(
+          members.length ? `- ${members.join(', ')}` : '- Attribute metadata unavailable.',
+        );
+      }
+    }
     const tags = renderTags(result.tags);
     if (tags) lines.push(tags);
     const aliases = renderAliases(result.aliases);

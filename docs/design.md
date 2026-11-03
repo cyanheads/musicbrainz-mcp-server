@@ -27,9 +27,13 @@ Open music metadata over the live MusicBrainz Web Service v2 and the Cover Art A
 |:-------------|:------------|:-----------|
 | `musicbrainz://{entity_type}/{mbid}` | A single MusicBrainz entity by type and MBID, returned as a stable injectable-context resource. Mirrors the corresponding `get_*` tool with default `inc` sets. `entity_type` ∈ artist, release-group, release, recording, work, label. | None (single entity) |
 
-One resource template, not six — the entity type is a path parameter. This is a convenience mirror for clients that support resources; every entity is fully reachable through the `get_*` tools, so tool-only clients lose nothing. No `list()` — the corpus is millions of entities; discovery is via `search_entities`, not resource enumeration.
+One entity resource template uses the entity type as a path parameter. It exposes raw lookup data; the `get_*` tools provide normalized views for tool-only clients. The entity resource has no `list()` — discovery is via `search_entities`.
 
 Recording resources include the tool's `releaseAppearanceSummary`; release resources preserve the complete raw media/track arrays, independent of the release tool's media window. Work resources retain the recording-relationship slice and its summary.
+
+### Agent skill
+
+`skills/musicbrainz-guide/` carries identity and completeness gates, edition/credit workflows, and a Lucene reference. `createApp({ skills: 'skills' })` serves it through the MCP Skills extension and `skill://` resources; the same tree ships in npm, Docker, MCPB, and plugin installs. Server instructions retain the essential identifier chain, paging cautions, rate posture, and trust boundary.
 
 ### Prompts
 
@@ -103,11 +107,11 @@ Six core nouns, each with the three access modes. The matrix below is what each 
 | Noun | Search | Lookup (key `inc`) | Browse links (this noun by parent) |
 |:-----|:-------|:-------------------|:-----------------------------------|
 | **artist** | ✔ `score`, type, country, life-span, area, tags | `release-groups`, `artist-rels`, `url-rels`, `aliases`, `tags`, `genres` | by `area`, `recording`, `release`, `release-group`, `work` |
-| **release-group** | ✔ primary/secondary type, first-release-date | `releases`, `artist-credits`, `tags`, `genres` | by `artist`, `release` |
-| **release** | ✔ barcode, status, date, country, label | `recordings`, `media`, `labels`, `artist-credits`, `release-groups`, `isrcs` | by `area`, `artist`, `label`, `release-group`, `recording` |
-| **recording** | ✔ length, ISRCs, artist-credit | `artist-credits`, `releases`, `isrcs`, `artist-rels`, `work-rels`, `url-rels` | by `artist`, `release`, `work` |
+| **release-group** | ✔ primary/secondary type, first-release-date | `releases`, `artist-credits`, `tags`, `genres`, `url-rels` | by `artist`, `release` |
+| **release** | ✔ barcode, status, date, country, label | `recordings`, `labels`, `artist-credits`, `release-groups`, `url-rels` | by `area`, `artist`, `label`, `release-group`, `recording`, `track_artist` |
+| **recording** | ✔ length, ISRCs, artist-credit, first-release-date | `artist-credits`, `releases`, `isrcs`, `artist-rels`, `work-rels`, `recording-rels`, `url-rels` | by `artist`, `release`, `work` |
 | **work** | ✔ ISWCs, type, language | `artist-rels`, `work-rels`, `recording-rels`, `aliases`, `tags`, `genres`, `url-rels` | by `artist` |
-| **label** | ✔ type, country, code, area | `aliases`, `tags`, `url-rels` | by `area`, `release` |
+| **label** | ✔ type, country, code, area | `aliases`, `tags`, `genres`, `label-rels`, `url-rels` | by `area`, `release` |
 
 **Identifier endpoints (deterministic, no name search):**
 
@@ -135,6 +139,14 @@ The split matters: ISRC/ISWC are true endpoints (exact, deterministic), barcode 
 
 ## Design Decisions
 
+- **Search and browse have different reach.** Search exposes only the first 500 matches. After the existing maximum-100 clamp, shorten a straddling page to `500 - offset`; reject offsets at or above 500 with `search_window_exceeded`. Window reductions do not count as oversized-limit clamps. Notices preserve the exact upstream total and stop offering continuations at the search ceiling; complete linked enumeration belongs to browse.
+
+- **Browse filters follow the upstream parent branch.** `type` is accepted for release-groups by artist and releases by artist/label/recording/track_artist; `status` also works for releases by release-group. Area browse ignores both upstream, and release-by-release-group and release-group-by-release ignore `type`, so those nonempty combinations fail locally as `invalid_filter`. Trim/lowercase pipe-separated tokens, reject unknown or empty members, and echo canonical applied filters. Primary types union, primary/secondary categories intersect, and artist release-group browsing requires all supplied secondary types. Never filter a returned page locally and report its upstream total as the filtered total. `track_artist` finds track credits excluding release-level artist credits.
+
+- **Credits and catalog identifiers keep their original scope.** Track `artistCredit` comes only from the track's own array, with canonical/credited names, MBIDs and verbatim joins; no recording or release fallback. Work `attributes` retains ordered repeated type/value rows regardless of relationship flags. Artist/label IPI and ISNI arrays retain exact strings. `areaId` exposes the associated area's MBID for browse, while artist begin/end areas preserve whichever ID/name members are known. Missing metadata never becomes an inferred fact.
+
+- **Relationships use the existing lookup request.** Release and release-group `url-rels` feed `externalLinks`; recording `recording-rels` and label `label-rels` feed `relationships`. Resource defaults request the same includes. Recording relationships honor `inc_relationships`; no extra request, recursive traversal, or new relationship cap is added.
+
 - **Recording release completeness comes from the lookup alone.** `releaseAppearanceSummary` is shared by tool and resource without mutating cached raw data. A short present release page proves completeness; full or absent arrays without a count remain unknown. An exact upstream release count takes precedence and proves truncation only when it exceeds shown. Browse starts at offset 0 because its order may differ; no count request is added.
 
 - **Detail windows preserve complete retrieval.** The release tool normalizes all media first, calculates `mediaTotal` and track-occurrence `trackTotal`, then selects whole media with `media_offset`/`media_limit` (0/20 by default, no maximum), preserving upstream `trackCount`. The release resource remains complete. Cover-art windows select cached archive images with independent limit/offset (25/0 by default, maximum 100 in the handler regardless of the search/browse setting). Exact image totals determine hasArt; one notice combines clamp, continuation, exhaustion and no-art guidance. Continuations advance by actual returned rows; neither service fetch nor cache behavior changes.
@@ -143,7 +155,7 @@ The split matters: ISRC/ISWC are true endpoints (exact, deterministic), barcode 
 
 - **Identifier grammar belongs in the handler.** ISRC accepts compact or fully grouped printed forms, case-insensitively with surrounding whitespace, and echoes compact uppercase. ISWC accepts T plus ten digits with optional hyphen after T, optional dots between three-digit groups, and optional hyphen/dot before the check digit, ignoring whitespace and case; it echoes `T-DDD.DDD.DDD-C`. Description/examples advertise accepted forms without schema rejection, preserving `invalid_identifier` for malformed codes. No check digit is repaired; barcode normalization is unchanged.
 
-- **Browse pair validation precedes the request.** The 18 supported target/parent pairs in the matrix are validated after aliases and the one-parent rule. UUID validation remains separate. Unsupported combinations name accepted parents; a residual upstream 400 describes a rejected query without blaming a valid UUID. Missing parents retain `entity_not_found`.
+- **Browse pair validation precedes the request.** The 19 supported target/parent pairs in the matrix are validated after aliases and the one-parent rule. UUID validation remains separate. Unsupported combinations name accepted parents; a residual upstream 400 describes a rejected query without blaming a valid UUID. Missing parents retain `entity_not_found`; area recovery points to `get_artist`/`get_label` `areaId` discovery from a known entity.
 
 - **Six separate `get_*` lookup tools, not one mode-dispatched `get_entity`.** The brief's instinct, confirmed by live probing: each entity's payload shape genuinely diverges — artist → discography + band membership; release → media/tracklist + label-info + barcode; recording → performers + ISRCs + work-rels; work → writers + ISWCs + recording-rels. A single `get_entity(type, mbid)` would carry a sprawling six-arm output union that's harder for the agent to reason about than six focused tools with tight, purpose-built schemas. Mode consolidation is for related ops on *one* noun; these are six different nouns. The cost is six tool slots, paid for by clarity at the point of selection and at the point of reading output.
 
@@ -187,6 +199,8 @@ Per-tool typed contracts (`errors: [{ reason, code, when, recovery, retryable? }
 | `lookup_identifier` | `identifier_not_found` | `NotFound` | Valid-format ISRC/ISWC/barcode that resolves to zero entities | no |
 | `lookup_identifier` | `invalid_identifier` | `ValidationError` | Malformed ISRC/ISWC rejected locally or by upstream **400**, or a barcode holding anything but digits once spaces/hyphens are removed (rejected locally, before the call) | no |
 | `search_entities` | `blank_query` | `ValidationError` | Query is whitespace-only — rejected locally, before the call, instead of MusicBrainz's generic blank-query **400** | no |
+| `search_entities` | `search_window_exceeded` | `ValidationError` | Offset is at least 500; narrow the query or browse a linked set | no |
+| `browse_entities` | `invalid_filter` | `ValidationError` | Unknown filter token, empty pipe-list member, or unsupported target/parent filter combination | no |
 | `browse_entities` | `invalid_link` | `ValidationError` | Unknown parent key, alias collision, not exactly one nonempty parent, malformed/all-zero MBID, or upstream rejected parent combination | no |
 | `browse_entities` | `entity_not_found` | `NotFound` | The link MBID is well-formed but no such parent exists (**HTTP 404**) | no |
 | `search_entities`, `browse_entities` | *(none — empty list)* | — | Zero matches is a valid empty result with a notice, not an error | — |
@@ -204,6 +218,8 @@ The empty-result cases (`get_cover_art` no-art, search/browse zero-hits) deliber
 
 ## Known Limitations
 
+- **Search reaches only the first 500 matches.** Exact `totalCount` can exceed that window; narrower queries or linked browse are required to retrieve more. Browse filters vary by parent and preserve MusicBrainz's category semantics; an Album primary type alone does not prove a studio album.
+
 - **~1 req/sec ceiling is the binding constraint on a hosted instance.** Caching mitigates repeat lookups, but cold multi-tenant load is serialized behind one shared limiter. Acceptable (precedent: `courtlistener` at 5 req/min); callers doing bulk enumeration via `browse_entities` will feel the pace.
 - **Artist release-groups, release-group editions, and recording release appearances embed one upstream page (25).** Use browse for complete enumeration. Recording summaries preserve unknown completeness without a count fetch. Work recording relationships are separately sliced by the server to 25; release-tool media and cover-art image windows have independent continuation paths.
 - **Sparsity / nullability drift across modes.** The same field can present differently between search and lookup — e.g. `life-span.ended` came back `null` from search but `false` from lookup. Domain schemas must mark cross-entity-shared fields optional/nullable and the normalization layer must not fabricate values from missing upstream data. (Tests must include a sparse-payload case per the framework checklist.)
@@ -213,7 +229,7 @@ The empty-result cases (`get_cover_art` no-art, search/browse zero-hits) deliber
 ## API Reference
 
 - **Base:** `https://musicbrainz.org/ws/2` · JSON via `?fmt=json` · keyless · mandatory descriptive `User-Agent`.
-- **Search:** `/{type}?query={lucene}&limit={≤100}&offset={n}&fmt=json` → `{ created, count, offset, {type}s: [ { id, score, … } ] }`. `count` is total matches; `score` is 0–100 relevance.
+- **Search:** `/{type}?query={lucene}&limit={≤100}&offset={n}&fmt=json` → `{ created, count, offset, {type}s: [ { id, score, … } ] }`. `count` is total matches; `score` is 0–100 relevance. Upstream requires `offset + limit ≤ 500`.
 - **Lookup:** `/{type}/{mbid}?inc={a+b+c}&fmt=json` → entity with requested linked data. Artist release-groups, release-group editions and recording release appearances embed one page (25); relationship arrays and upstream release tracklists do not follow that cap. The server separately slices work recording relationships to 25 and pages release-tool media; release resources retain the full raw tracklist.
 - **Browse:** `/{type}?{link}={mbid}&limit={≤100}&offset={n}&fmt=json` → `{ {type}-count, {type}-offset, {type}s: […] }`. Distinct pagination envelope from search (`{type}-count`, not `count`). The complete-enumeration path; `offset` pages arbitrarily deep.
 - **Identifier endpoints:** `/isrc/{isrc}` → `{ isrc, recordings[] }` (recordings included by default; `inc=artist-credits` adds their credits); `/iswc/{iswc}` → `{ work-count, work-offset, works[] }` (browse-style envelope, works included by default). Barcode is **not** an endpoint — use `/release?query=barcode:{value}`.

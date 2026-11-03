@@ -21,9 +21,11 @@ import {
   normalizeLifeSpan,
   normalizeRelations,
   normalizeTags,
+  RelationSchema,
   renderAliases,
   renderExternalLinks,
   renderLifeSpan,
+  renderRelationships,
   renderTags,
   safeText,
   TagSchema,
@@ -32,7 +34,7 @@ import {
 export const getLabelTool = tool('musicbrainz_get_label', {
   title: 'musicbrainz-mcp-server: get label',
   description:
-    "Label by MBID: type (Original Production, Reissue, Imprint, …), country, life span, label code (the LC number), area, aliases, tags, and external links (url-rels — Wikidata, Discogs, official site). A label's releases are a potentially huge linked set (a major label can have tens of thousands), so they are NOT embedded here — enumerate them with musicbrainz_browse_entities (target_type=release, link.label).",
+    "Label by MBID: type (Original Production, Reissue, Imprint, …), country, life span, label code (the LC number), area and areaId, IPI/ISNI identifiers, aliases, tags, ownership/imprint/distribution relationships, and external links (url-rels — Wikidata, Discogs, official site). Chain areaId into musicbrainz_browse_entities link.area. A label's releases are a potentially huge linked set (a major label can have tens of thousands), so they are NOT embedded here — enumerate them with musicbrainz_browse_entities (target_type=release, link.label).",
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -69,6 +71,16 @@ export const getLabelTool = tool('musicbrainz_get_label', {
       .describe('Label code (LC number), without the "LC" prefix. Omitted when absent.'),
     country: z.string().optional().describe('ISO country code. Omitted when unknown.'),
     area: z.string().optional().describe('Associated area name. Omitted when unknown.'),
+    areaId: z
+      .string()
+      .optional()
+      .describe('Area MBID for musicbrainz_browse_entities link.area. Omitted when unknown.'),
+    ipis: z
+      .array(z.string())
+      .describe('IPI identifiers as exact strings in upstream order (may be empty).'),
+    isnis: z
+      .array(z.string())
+      .describe('ISNI identifiers as exact strings in upstream order (may be empty).'),
     lifeSpan: LifeSpanSchema.optional().describe(
       'Founding/dissolution span. Omitted when unknown.',
     ),
@@ -77,6 +89,11 @@ export const getLabelTool = tool('musicbrainz_get_label', {
     externalLinks: z
       .array(ExternalLinkSchema)
       .describe('External resource links (url-rels) (may be empty).'),
+    relationships: z
+      .array(RelationSchema)
+      .describe(
+        'Label ownership, imprint and distribution relationships in upstream order, uncapped (may be empty).',
+      ),
   }),
 
   async handler(input, ctx) {
@@ -88,7 +105,7 @@ export const getLabelTool = tool('musicbrainz_get_label', {
       raw = await service.lookup<RawLabel>(
         'label',
         input.mbid,
-        { inc: ['aliases', 'tags', 'genres', 'url-rels'] },
+        { inc: ['aliases', 'tags', 'genres', 'url-rels', 'label-rels'] },
         ctx,
         { signal: ctx.signal },
       );
@@ -101,7 +118,7 @@ export const getLabelTool = tool('musicbrainz_get_label', {
       throw error;
     }
 
-    const { externalLinks } = normalizeRelations(raw.relations);
+    const { relationships, externalLinks } = normalizeRelations(raw.relations);
     const lifeSpan = normalizeLifeSpan(raw['life-span']);
 
     return {
@@ -113,10 +130,14 @@ export const getLabelTool = tool('musicbrainz_get_label', {
       ...(typeof raw['label-code'] === 'number' ? { labelCode: raw['label-code'] } : {}),
       ...(raw.country ? { country: raw.country } : {}),
       ...(raw.area?.name ? { area: raw.area.name } : {}),
+      ...(raw.area?.id ? { areaId: raw.area.id } : {}),
+      ipis: raw.ipis ?? [],
+      isnis: raw.isnis ?? [],
       ...(lifeSpan ? { lifeSpan } : {}),
       aliases: normalizeAliases(raw.aliases),
       tags: normalizeTags(raw.tags ?? raw.genres),
       externalLinks,
+      relationships,
     };
   },
 
@@ -129,6 +150,9 @@ export const getLabelTool = tool('musicbrainz_get_label', {
     if (typeof result.labelCode === 'number') lines.push(`**Label code:** LC ${result.labelCode}`);
     if (result.country) lines.push(`**Country:** ${result.country}`);
     if (result.area) lines.push(`**Area:** ${safeText(result.area)}`);
+    if (result.areaId) lines.push(`**Area MBID:** ${result.areaId}`);
+    if (result.ipis.length) lines.push(`**IPIs:** ${result.ipis.map(safeText).join(', ')}`);
+    if (result.isnis.length) lines.push(`**ISNIs:** ${result.isnis.map(safeText).join(', ')}`);
     const ls = renderLifeSpan(result.lifeSpan);
     if (ls) lines.push(ls);
     if (result.sortName) lines.push(`**Sort name:** ${safeText(result.sortName)}`);
@@ -137,6 +161,7 @@ export const getLabelTool = tool('musicbrainz_get_label', {
     const aliases = renderAliases(result.aliases);
     if (aliases) lines.push(aliases);
     lines.push(...renderExternalLinks(result.externalLinks));
+    lines.push(...renderRelationships(result.relationships));
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });

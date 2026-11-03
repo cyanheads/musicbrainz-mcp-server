@@ -64,6 +64,32 @@ afterEach(() => {
 });
 
 describe('MusicBrainzService', () => {
+  it('separates filtered browse cache entries and preserves encoded pipe lists', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ 'release-count': 0, releases: [] }));
+    const service = makeService(3600);
+    const ctx = realStorageContext();
+    const base = {
+      link: 'track_artist' as const,
+      linkMbid: 'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      limit: 25,
+      offset: 0,
+    };
+    for (const filters of [
+      {},
+      { type: 'audio drama|mixtape/street' },
+      { type: 'audio drama|mixtape/street', status: 'official|withdrawn' },
+    ]) {
+      await service.browse('release', { ...base, ...filters }, ctx);
+      await service.browse('release', { ...base, ...filters }, ctx);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const urls = fetchMock.mock.calls.map(([url]) => new URL(url));
+    expect(urls[0]!.searchParams.has('type')).toBe(false);
+    expect(urls[1]!.searchParams.get('type')).toBe('audio drama|mixtape/street');
+    expect(urls[1]!.searchParams.has('status')).toBe(false);
+    expect(urls[2]!.searchParams.get('status')).toBe('official|withdrawn');
+    for (const url of urls) expect(url.searchParams.get('track_artist')).toBe(base.linkMbid);
+  });
   it.each([
     'not-a-uuid',
     '00000000-0000-0000-0000-000000000000',

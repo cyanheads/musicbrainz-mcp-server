@@ -14,6 +14,7 @@ export type EntityType = 'artist' | 'release-group' | 'release' | 'recording' | 
 /** Parent link types for the browse endpoint (one parent MBID per browse call). */
 export type BrowseLink =
   | 'artist'
+  | 'track_artist'
   | 'label'
   | 'release-group'
   | 'release'
@@ -93,9 +94,12 @@ export interface RawArtist {
   'begin-area'?: RawArea | null;
   country?: string | null;
   disambiguation?: string;
+  'end-area'?: RawArea | null;
   gender?: string | null;
   genres?: RawTag[];
   id: string;
+  ipis?: string[];
+  isnis?: string[];
   'life-span'?: RawLifeSpan;
   name?: string;
   relations?: RawRelation[];
@@ -138,6 +142,7 @@ export interface RawCoverArtStub {
 }
 
 export interface RawTrack {
+  'artist-credit'?: RawArtistCredit[];
   id?: string;
   length?: number | null;
   number?: string;
@@ -226,6 +231,8 @@ export interface RawLabel {
   disambiguation?: string;
   genres?: RawTag[];
   id: string;
+  ipis?: string[];
+  isnis?: string[];
   'label-code'?: number | null;
   'life-span'?: RawLifeSpan;
   name?: string;

@@ -15,13 +15,16 @@ import {
   artistCreditString,
   CoverArtStubSchema,
   classifyMbidError,
+  ExternalLinkSchema,
   formatDuration,
   MBID_EXAMPLE,
   MbidInput,
   normalizeArtistCredits,
   normalizeCoverArtStub,
+  normalizeRelations,
   renderArtistCredits,
   renderCoverArtStub,
+  renderExternalLinks,
   safeText,
 } from './_shared.js';
 
@@ -38,6 +41,16 @@ const TrackSchema = z
       .string()
       .optional()
       .describe('Recording MBID — chain to musicbrainz_get_recording. Omitted when absent.'),
+    artistCredit: z
+      .array(ArtistCreditSchema)
+      .optional()
+      .describe('Track-specific artist credit. Omitted when not supplied; may be empty.'),
+    artistCreditString: z
+      .string()
+      .optional()
+      .describe(
+        'Track-specific display credit with verbatim join phrases. Omitted without credited artists.',
+      ),
   })
   .describe('A track on a medium, linked to its underlying recording.');
 
@@ -80,7 +93,7 @@ const LabelInfoSchema = z
 export const getReleaseTool = tool('musicbrainz_get_release', {
   title: 'musicbrainz-mcp-server: get release',
   description:
-    'One edition by MBID: ordered media with tracks, lengths and recording MBIDs, label + catalog number, barcode, country, release date, packaging, text representation, and a cover-art availability stub. media_offset (default 0) and media_limit (default 20, no maximum) select whole media after normalization; mediaTotal and trackTotal describe the full release. Follow the notice to retrieve remaining media. The release resource retains the complete raw tracklist. Track lengths are m:ss. For image URLs, call musicbrainz_get_cover_art.',
+    'One edition by MBID: ordered media with tracks, track-specific artist credits when supplied, lengths and recording MBIDs, label + catalog number, barcode, country, release date, packaging, text representation, external links, and a cover-art availability stub. media_offset (default 0) and media_limit (default 20, no maximum) select whole media after normalization; mediaTotal and trackTotal describe the full release. Follow the notice to retrieve remaining media. The release resource retains the complete raw tracklist. Track lengths are m:ss. For image URLs, call musicbrainz_get_cover_art.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -153,6 +166,9 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
         'Parent release-group MBID — chain to musicbrainz_get_release_group. Omitted when absent.',
       ),
     labelInfo: z.array(LabelInfoSchema).describe('Label / catalog-number pairings (may be empty).'),
+    externalLinks: z
+      .array(ExternalLinkSchema)
+      .describe('External links for this edition, such as Discogs release pages (may be empty).'),
     mediaOffset: z.number().describe('Effective zero-based medium offset.'),
     mediaTotal: z.number().describe('Exact number of media in the whole normalized release.'),
     trackTotal: z
@@ -186,7 +202,7 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       raw = await service.lookup<RawRelease>(
         'release',
         input.mbid,
-        { inc: ['recordings', 'artist-credits', 'labels', 'release-groups'] },
+        { inc: ['recordings', 'artist-credits', 'labels', 'release-groups', 'url-rels'] },
         ctx,
         { signal: ctx.signal },
       );
@@ -200,6 +216,7 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
     }
 
     const credits = normalizeArtistCredits(raw['artist-credit']);
+    const { externalLinks } = normalizeRelations(raw.relations);
     const media = (raw.media ?? []).map((m) => ({
       ...(typeof m.position === 'number' ? { position: m.position } : {}),
       ...(m.format ? { format: m.format } : {}),
@@ -207,12 +224,16 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       ...(typeof m['track-count'] === 'number' ? { trackCount: m['track-count'] } : {}),
       tracks: (m.tracks ?? []).map((t) => {
         const length = formatDuration(t.length ?? t.recording?.length);
+        const trackCredits =
+          t['artist-credit'] === undefined ? undefined : normalizeArtistCredits(t['artist-credit']);
         return {
           ...(typeof t.position === 'number' ? { position: t.position } : {}),
           ...(t.number ? { number: t.number } : {}),
           title: t.title ?? t.recording?.title ?? '',
           ...(length ? { length } : {}),
           ...(t.recording?.id ? { recordingId: t.recording.id } : {}),
+          ...(trackCredits ? { artistCredit: trackCredits } : {}),
+          ...(trackCredits?.length ? { artistCreditString: artistCreditString(trackCredits) } : {}),
         };
       }),
     }));
@@ -257,6 +278,7 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
       ...(raw['text-representation']?.script ? { script: raw['text-representation'].script } : {}),
       ...(raw['release-group']?.id ? { releaseGroupId: raw['release-group'].id } : {}),
       labelInfo,
+      externalLinks,
       mediaOffset: input.media_offset,
       mediaTotal,
       trackTotal,
@@ -306,10 +328,12 @@ export const getReleaseTool = tool('musicbrainz_get_release', {
         const num =
           t.number && t.number !== String(t.position) ? ` (printed ${safeText(t.number)})` : '';
         lines.push(
-          `${posLabel || (t.number ? safeText(t.number) : '?')}${num}. ${safeText(t.title)}${t.length ? ` (${t.length})` : ''}${t.recordingId ? ` — ${t.recordingId}` : ''}`,
+          `${posLabel || (t.number ? safeText(t.number) : '?')}${num}. ${safeText(t.title)}${t.artistCreditString ? ` — ${safeText(t.artistCreditString)}` : ''}${t.length ? ` (${t.length})` : ''}${t.recordingId ? ` — ${t.recordingId}` : ''}`,
         );
+        if (t.artistCredit?.length) lines.push(...renderArtistCredits(t.artistCredit));
       }
     }
+    lines.push(...renderExternalLinks(result.externalLinks));
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });

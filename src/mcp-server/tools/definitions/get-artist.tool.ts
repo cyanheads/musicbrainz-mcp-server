@@ -35,6 +35,13 @@ import {
 /** One page cap for lookup `inc` embedded lists (25 default / 100 max, no deep offset). */
 const LOOKUP_PAGE_CAP = 25;
 
+const AreaRefSchema = z
+  .object({
+    mbid: z.string().optional().describe('Area MBID. Omitted when unknown.'),
+    name: z.string().optional().describe('Area name. Omitted when unknown.'),
+  })
+  .describe('Known members of an artist location.');
+
 const ReleaseGroupRefSchema = z
   .object({
     mbid: z.string().describe('Release-group MBID — chain to musicbrainz_get_release_group.'),
@@ -55,7 +62,7 @@ const ReleaseGroupRefSchema = z
 export const getArtistTool = tool('musicbrainz_get_artist', {
   title: 'musicbrainz-mcp-server: get artist',
   description:
-    'Artist profile by MBID: type, country, life span, gender, area, aliases, tags/genres, release-groups, band-membership / collaboration relationships, and external links. Release-groups embed one upstream page (25); relationships are not capped. For the complete release-group list, call musicbrainz_browse_entities with target_type=release-group and link.artist.',
+    'Artist profile by MBID: type, country, life span, gender, area with areaId, birth/formation and death/dissolution areas, IPI/ISNI identifiers, aliases, tags/genres, release-groups, band-membership / collaboration relationships, and external links. Chain areaId into musicbrainz_browse_entities link.area. Release-groups embed one upstream page (25); relationships are not capped. For the complete release-group list, call musicbrainz_browse_entities with target_type=release-group and link.artist.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -110,6 +117,18 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       .describe('Gender, for person-type artists. Omitted when unknown/inapplicable.'),
     country: z.string().optional().describe('ISO country code. Omitted when unknown.'),
     area: z.string().optional().describe('Associated area name. Omitted when unknown.'),
+    areaId: z
+      .string()
+      .optional()
+      .describe('Area MBID for musicbrainz_browse_entities link.area. Omitted when unknown.'),
+    beginArea: AreaRefSchema.optional().describe('Birth or formation area. Omitted when unknown.'),
+    endArea: AreaRefSchema.optional().describe('Death or dissolution area. Omitted when unknown.'),
+    ipis: z
+      .array(z.string())
+      .describe('IPI identifiers as exact strings in upstream order (may be empty).'),
+    isnis: z
+      .array(z.string())
+      .describe('ISNI identifiers as exact strings in upstream order (may be empty).'),
     lifeSpan: LifeSpanSchema.optional().describe(
       'Birth/death or formation/dissolution span. Omitted when unknown.',
     ),
@@ -196,6 +215,25 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       ...(raw.gender ? { gender: raw.gender } : {}),
       ...(raw.country ? { country: raw.country } : {}),
       ...(raw.area?.name ? { area: raw.area.name } : {}),
+      ...(raw.area?.id ? { areaId: raw.area.id } : {}),
+      ...(raw['begin-area']
+        ? {
+            beginArea: {
+              ...(raw['begin-area'].id ? { mbid: raw['begin-area'].id } : {}),
+              ...(raw['begin-area'].name ? { name: raw['begin-area'].name } : {}),
+            },
+          }
+        : {}),
+      ...(raw['end-area']
+        ? {
+            endArea: {
+              ...(raw['end-area'].id ? { mbid: raw['end-area'].id } : {}),
+              ...(raw['end-area'].name ? { name: raw['end-area'].name } : {}),
+            },
+          }
+        : {}),
+      ipis: raw.ipis ?? [],
+      isnis: raw.isnis ?? [],
       ...(lifeSpan ? { lifeSpan } : {}),
       aliases: normalizeAliases(raw.aliases),
       tags: normalizeTags(raw.tags ?? raw.genres),
@@ -214,6 +252,22 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
     if (result.gender) lines.push(`**Gender:** ${safeText(result.gender)}`);
     if (result.country) lines.push(`**Country:** ${result.country}`);
     if (result.area) lines.push(`**Area:** ${safeText(result.area)}`);
+    if (result.areaId) lines.push(`**Area MBID:** ${result.areaId}`);
+    for (const [label, area] of [
+      ['Begin area', result.beginArea],
+      ['End area', result.endArea],
+    ] as const) {
+      if (area) {
+        const members = [area.name ? safeText(area.name) : undefined, area.mbid].filter(
+          (member) => member !== undefined,
+        );
+        lines.push(
+          `**${label}:** ${members.length ? members.join(' — ') : 'Metadata unavailable.'}`,
+        );
+      }
+    }
+    if (result.ipis.length) lines.push(`**IPIs:** ${result.ipis.map(safeText).join(', ')}`);
+    if (result.isnis.length) lines.push(`**ISNIs:** ${result.isnis.map(safeText).join(', ')}`);
     const ls = renderLifeSpan(result.lifeSpan);
     if (ls) lines.push(ls);
     if (result.sortName) lines.push(`**Sort name:** ${safeText(result.sortName)}`);

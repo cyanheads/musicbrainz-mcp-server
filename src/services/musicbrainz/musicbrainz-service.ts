@@ -77,6 +77,10 @@ export interface BrowseParams {
   link: BrowseLink;
   linkMbid: string;
   offset: number;
+  /** Canonical upstream pipe-separated release statuses. */
+  status?: string;
+  /** Canonical upstream pipe-separated release types. */
+  type?: string;
 }
 
 /**
@@ -150,6 +154,8 @@ export class MusicBrainzService {
     if (target === 'release-group' || target === 'release' || target === 'recording') {
       search.set('inc', 'artist-credits');
     }
+    if (params.type) search.set('type', params.type);
+    if (params.status) search.set('status', params.status);
     return await this.request<BrowseEnvelope & Record<`${T}-count`, number>>(
       `/${target}?${search.toString()}`,
       ctx,

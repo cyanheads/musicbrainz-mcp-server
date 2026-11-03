@@ -67,7 +67,7 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
       .boolean()
       .default(true)
       .describe(
-        'Include performance/production relationships (performers, producers, engineers) and work-rels.',
+        'Include performance/production, work and recording relationships (samples, mashups, music videos, DJ mixes), and external links.',
       ),
   }),
 
@@ -112,7 +112,9 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
       .describe('Completeness evidence derived only from this recording lookup.'),
     relationships: z
       .array(RelationSchema)
-      .describe('Performance/production relationships and work-rels (may be empty).'),
+      .describe(
+        'Performance/production, work and recording relationships in upstream order, uncapped (may be empty).',
+      ),
     externalLinks: z
       .array(ExternalLinkSchema)
       .describe('External resource links (url-rels) (may be empty).'),
@@ -123,7 +125,7 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
     const service = getMusicBrainzService();
 
     const inc = ['artist-credits', 'releases', 'isrcs'];
-    if (input.inc_relationships) inc.push('artist-rels', 'work-rels', 'url-rels');
+    if (input.inc_relationships) inc.push('artist-rels', 'work-rels', 'recording-rels', 'url-rels');
 
     let raw: RawRecording;
     try {
@@ -140,7 +142,9 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
     }
 
     const credits = normalizeArtistCredits(raw['artist-credit']);
-    const { relationships, externalLinks } = normalizeRelations(raw.relations);
+    const { relationships, externalLinks } = normalizeRelations(
+      input.inc_relationships ? raw.relations : undefined,
+    );
     const length = formatDuration(raw.length);
     const releases = (raw.releases ?? []).map((r) => ({
       mbid: r.id,

@@ -43,15 +43,25 @@ export function pageNotice(
   requested: number,
   applied: number,
   emptyNotice: string,
+  searchLimit?: number,
 ): string | undefined {
   const notices: string[] = [];
   if (requested > applied) notices.push(`Requested limit ${requested} was clamped to ${applied}.`);
+  if (searchLimit !== undefined && searchLimit < applied) {
+    notices.push(
+      `The search window reduced this page limit to ${searchLimit} (500 matches maximum).`,
+    );
+  }
   if (total === 0) notices.push(emptyNotice);
   else if (shown === 0) {
     notices.push(
       offset >= total
         ? `This page is exhausted: offset=${offset} is at or beyond the total of ${total}. Request a lower offset to retrieve matches.`
         : `MusicBrainz returned an empty page at offset=${offset} despite reporting ${total} total entities. Retry later or verify the query; no advancing continuation offset is available.`,
+    );
+  } else if (searchLimit !== undefined && offset + shown >= 500 && offset + shown < total) {
+    notices.push(
+      'The 500-match search window is exhausted. Narrow the query or use musicbrainz_browse_entities for complete linked sets.',
     );
   } else if (offset + shown < total) {
     const remaining = total - offset - shown;

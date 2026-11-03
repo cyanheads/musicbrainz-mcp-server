@@ -78,6 +78,16 @@ const ResultSchema = z
       .optional()
       .describe('ISRCs on a recording result. Omitted when none.'),
     iswcs: z.array(z.string()).optional().describe('ISWCs on a work result. Omitted when none.'),
+    secondaryTypes: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Release-group secondary classifications, in upstream order. Omitted when empty; absence does not establish a studio album.',
+      ),
+    firstReleaseDate: z
+      .string()
+      .optional()
+      .describe('Recording first-release date, possibly partial. Omitted when absent.'),
   })
   .describe('A ranked search hit. Type-specific fields appear only for the relevant entity type.');
 
@@ -119,6 +129,7 @@ function mapHit(type: EntityType, raw: unknown): z.infer<typeof ResultSchema> {
       artistCredit: artistCreditString(normalizeArtistCredits(e['artist-credit'])),
       ...(length ? { length } : {}),
       ...(e.isrcs?.length ? { isrcs: e.isrcs } : {}),
+      ...(e['first-release-date'] ? { firstReleaseDate: e['first-release-date'] } : {}),
     };
   }
   // release-group | release
@@ -135,6 +146,9 @@ function mapHit(type: EntityType, raw: unknown): z.infer<typeof ResultSchema> {
     score,
     ...(disambiguation ? { disambiguation } : {}),
     ...(primaryType ? { type: primaryType } : {}),
+    ...(isReleaseGroup && (e as RawReleaseGroup)['secondary-types']?.length
+      ? { secondaryTypes: (e as RawReleaseGroup)['secondary-types'] }
+      : {}),
     ...(status ? { status } : {}),
     artistCredit: artistCreditString(normalizeArtistCredits(e['artist-credit'])),
     ...(date ? { date } : {}),
@@ -145,10 +159,17 @@ function mapHit(type: EntityType, raw: unknown): z.infer<typeof ResultSchema> {
 export const searchEntitiesTool = tool('musicbrainz_search_entities', {
   title: 'musicbrainz-mcp-server: search entities',
   description:
-    'Full-text search across a MusicBrainz entity type (artist, release-group, release, recording, work, label) using a Lucene query string. Returns ranked matches with MBID, name/title, disambiguation, subtype where applicable, release status, and a 0–100 relevance score (100 = exact). Release rows use status; other entity subtypes use type. Starting point when resolving a name to an MBID — chain the returned MBID into the matching musicbrainz_get_* tool. Results are in MusicBrainz score-descending order. Supports field-scoped Lucene syntax (e.g. `artist:radiohead AND country:GB`).',
+    'Full-text search across a MusicBrainz entity type (artist, release-group, release, recording, work, label) using a Lucene query string. Returns ranked matches with MBID, name/title, disambiguation, subtype where applicable, release status, release-group secondary types, recording first-release dates, and a 0–100 relevance score (100 = exact). Release rows use status; other entity subtypes use type. Starting point when resolving a name to an MBID — chain the returned MBID into the matching musicbrainz_get_* tool. Results are in MusicBrainz score-descending order. Supports field-scoped Lucene syntax (e.g. `artist:radiohead AND country:GB`). Only the first 500 matches are accessible; narrow the query or use musicbrainz_browse_entities for complete linked sets.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
+    {
+      reason: 'search_window_exceeded',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The offset is at or beyond the 500-match search window.',
+      recovery:
+        'Use an offset below 500 and narrow the query, or use musicbrainz_browse_entities for complete linked sets.',
+    },
     {
       reason: 'blank_query',
       code: JsonRpcErrorCode.ValidationError,
@@ -167,7 +188,14 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
         'Lucene query string; must contain non-whitespace text. Plain text matches names/titles; field scoping (e.g. `artist:`, `country:`, `tag:`) is supported. Sent to MusicBrainz exactly as given.',
       ),
     limit: PageLimit,
-    offset: z.number().int().min(0).default(0).describe('Result offset for pagination (0-based).'),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe(
+        'Result offset for pagination (0-based, below 500). A page crossing the 500-match ceiling is reduced to the remaining window.',
+      ),
   }),
 
   output: z.object({
@@ -199,8 +227,15 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
     if (input.query.trim().length === 0) {
       throw ctx.fail('blank_query', 'The search query is blank — it contains only whitespace.');
     }
+    if (input.offset >= 500) {
+      throw ctx.fail(
+        'search_window_exceeded',
+        'MusicBrainz search exposes only the first 500 matches.',
+      );
+    }
     const service = getMusicBrainzService();
-    const limit = applyPageLimit(input.limit, 'musicbrainz_search_entities', ctx);
+    const applied = applyPageLimit(input.limit, 'musicbrainz_search_entities', ctx);
+    const limit = Math.min(applied, 500 - input.offset);
     const envelope = await service.search(
       input.entityType,
       input.query,
@@ -221,8 +256,9 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
       input.offset,
       results.length,
       input.limit,
-      limit,
+      applied,
       `No ${input.entityType} matched "${input.query}". Broaden the query, check spelling, or try a different entityType.`,
+      limit,
     );
     if (notice) ctx.enrich.notice(notice);
 
@@ -241,6 +277,9 @@ export const searchEntitiesTool = tool('musicbrainz_search_entities', {
       );
       lines.push(`**MBID:** ${r.mbid} | **Score:** ${r.score}`);
       if (r.type) lines.push(`**Type:** ${safeText(r.type)}`);
+      if (r.secondaryTypes?.length)
+        lines.push(`**Secondary types:** ${r.secondaryTypes.map(safeText).join(', ')}`);
+      if (r.firstReleaseDate) lines.push(`**First release date:** ${safeText(r.firstReleaseDate)}`);
       if (r.status) lines.push(`**Status:** ${safeText(r.status)}`);
       if (r.artistCredit) lines.push(`**Artist:** ${safeText(r.artistCredit)}`);
       if (r.date) lines.push(`**Date:** ${r.date}`);

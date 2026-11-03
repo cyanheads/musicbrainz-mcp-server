@@ -139,6 +139,43 @@ describe('browse contract characterization', () => {
 });
 
 describe('browse parent and release fields', () => {
+  it.each([
+    [
+      'release-group',
+      'release-groups',
+      { 'secondary-types': ['Compilation', 'Live'] },
+      { secondaryTypes: ['Compilation', 'Live'] },
+      ['Compilation', 'Live'],
+    ],
+    ['release-group', 'release-groups', { 'secondary-types': [] }, {}, []],
+    [
+      'recording',
+      'recordings',
+      { 'first-release-date': '1997' },
+      { firstReleaseDate: '1997' },
+      ['1997'],
+    ],
+    ['recording', 'recordings', {}, {}, []],
+  ] as const)(
+    'preserves sparse %s browse metadata %j',
+    async (target_type, key, raw, expected, textValues) => {
+      browse.mockResolvedValueOnce({
+        [`${target_type}-count`]: 1,
+        [key]: [{ id: MBID, title: 'Title', ...raw }],
+      });
+      const result = await runToolContract(browseEntitiesTool, {
+        target_type,
+        link: { artist: MBID },
+      });
+      expect((result.structuredContent as { entities: object[] }).entities[0]).toEqual({
+        mbid: MBID,
+        name: 'Title',
+        artistCredit: 'Unknown artist',
+        ...expected,
+      });
+      for (const value of textValues) expect(JSON.stringify(result.content)).toContain(value);
+    },
+  );
   it.each(['release-group', 'release', 'recording'] as const)(
     'renders credited %s results on both surfaces',
     async (target_type) => {

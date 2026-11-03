@@ -24,12 +24,15 @@ import {
   artistCreditString,
   CoverArtStubSchema,
   classifyMbidError,
+  ExternalLinkSchema,
   MBID_EXAMPLE,
   MbidInput,
   normalizeArtistCredits,
+  normalizeRelations,
   normalizeTags,
   renderArtistCredits,
   renderCoverArtStub,
+  renderExternalLinks,
   renderTags,
   safeText,
   TagSchema,
@@ -68,7 +71,7 @@ function coverArtFromImages(images: RawCoverArtImage[]): z.infer<typeof CoverArt
 export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
   title: 'musicbrainz-mcp-server: get release group',
   description:
-    'Release-group ("the album" above specific pressings) by MBID: primary type (Album/Single/EP) and secondary types (Live/Compilation), first-release date, artist credit, the list of releases (editions), tags/genres, and cover-art availability from the Cover Art Archive (image count and front/back flags for the release-group\'s representative release — the art musicbrainz_get_cover_art returns; use that tool for the image URLs). The embedded releases list is capped at one page (25); for the complete set of editions, call musicbrainz_browse_entities with target_type=release and link.release-group. For a specific edition\'s tracklist, take a release MBID from the releases list and call musicbrainz_get_release.',
+    'Release-group ("the album" above specific pressings) by MBID: primary type (Album/Single/EP) and secondary types (Live/Compilation), first-release date, artist credit, the list of releases (editions), tags/genres, external album links, and cover-art availability from the Cover Art Archive (image count and front/back flags for the release-group\'s representative release — the art musicbrainz_get_cover_art returns; use that tool for the image URLs). The embedded releases list is capped at one page (25); for the complete set of editions, call musicbrainz_browse_entities with target_type=release and link.release-group. For a specific edition\'s tracklist, take a release MBID from the releases list and call musicbrainz_get_release.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -119,6 +122,9 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
         'Releases (editions) in this group (one page; may be empty or capped — use browse for all).',
       ),
     tags: z.array(TagSchema).describe('Community tags/genres (may be empty).'),
+    externalLinks: z
+      .array(ExternalLinkSchema)
+      .describe('External album links, such as Wikidata and Discogs master pages (may be empty).'),
     coverArt: CoverArtStubSchema.optional().describe(
       "Cover-art availability from the Cover Art Archive: the images of the release-group's representative release, the same art musicbrainz_get_cover_art returns (exists: false with count 0 when the archive has none). Omitted when the archive lookup could not complete — the notice says so.",
     ),
@@ -175,7 +181,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       raw = await service.lookup<RawReleaseGroup>(
         'release-group',
         input.mbid,
-        { inc: ['releases', 'artist-credits', 'tags', 'genres'] },
+        { inc: ['releases', 'artist-credits', 'tags', 'genres', 'url-rels'] },
         ctx,
         { signal: ctx.signal },
       );
@@ -189,6 +195,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
     }
 
     const credits = normalizeArtistCredits(raw['artist-credit']);
+    const { externalLinks } = normalizeRelations(raw.relations);
     const releases = (raw.releases ?? []).map((r) => ({
       mbid: r.id,
       title: r.title ?? '',
@@ -229,6 +236,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
       artistCreditString: artistCreditString(credits),
       releases,
       tags: normalizeTags(raw.tags ?? raw.genres),
+      externalLinks,
       ...(coverArt ? { coverArt } : {}),
     };
   },
@@ -259,6 +267,7 @@ export const getReleaseGroupTool = tool('musicbrainz_get_release_group', {
         lines.push(`- **${safeText(r.title)}**${dis}${meta ? ` (${meta})` : ''} — ${r.mbid}`);
       }
     }
+    lines.push(...renderExternalLinks(result.externalLinks));
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });
