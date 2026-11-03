@@ -25,6 +25,13 @@
     "model-context-protocol"
   ],
   "userConfig": {
+    "musicbrainz_contact": {
+      "type": "string",
+      "title": "MusicBrainz Contact",
+      "description": "Contact (email or URL) embedded in the mandatory descriptive MusicBrainz User-Agent. Optional — the server ships a default — but operators should set their own so MusicBrainz can reach them about traffic.",
+      "required": false,
+      "default": ""
+    },
     "clamp_oversized_limits": {
       "type": "boolean",
       "title": "Clamp Oversized Limits",
@@ -38,7 +45,7 @@
       "args": ["-y", "@cyanheads/musicbrainz-mcp-server"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
-        "MUSICBRAINZ_CONTACT": "${MUSICBRAINZ_CONTACT}",
+        "MUSICBRAINZ_CONTACT": "${user_config.musicbrainz_contact}",
         "MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS": "${user_config.clamp_oversized_limits}"
       }
     }
