@@ -11,6 +11,7 @@
 /coverage/
 /logs/
 /.cache/
+/node_modules/.vitest-cache/
 /tests/
 /Dockerfile
 /bun.lock
