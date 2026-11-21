@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-11-21 · ⚠️ Breaking
+
+Identify release editions and explore MusicBrainz credits and areas.
+
 ## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-11-03
 
 Music metadata, filtered browsing, and an agent guide.
