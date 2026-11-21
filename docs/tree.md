@@ -1,6 +1,6 @@
 # musicbrainz-mcp-server - Directory Structure
 
-Generated on: 2026-11-03 08:20:25
+Generated on: 2026-11-21 17:45:14
 
 ```text
 musicbrainz-mcp-server/
@@ -166,6 +166,7 @@ musicbrainz-mcp-server/
 │   │           ├── get-work.tool.ts
 │   │           ├── index.ts
 │   │           ├── lookup-identifier.tool.ts
+│   │           ├── release-edition.ts
 │   │           └── search-entities.tool.ts
 │   ├── services/
 │   │   ├── cover-art/
@@ -194,6 +195,7 @@ musicbrainz-mcp-server/
 │   └── tools/
 │       ├── browse-entities.test.ts
 │       ├── contract-boundary.test.ts
+│       ├── framework-upgrade.test.ts
 │       ├── get-artist.test.ts
 │       ├── get-cover-art-verification.test.ts
 │       ├── get-cover-art.test.ts

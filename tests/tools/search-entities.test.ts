@@ -12,19 +12,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const searchMock = vi.fn();
 
-vi.mock('@/services/musicbrainz/musicbrainz-service.js', () => ({
+vi.mock('@/services/musicbrainz/musicbrainz-service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/musicbrainz/musicbrainz-service.js')>()),
   getMusicBrainzService: () => ({ search: searchMock }),
-  MusicBrainzService: {
-    pluralKey: (type: string) =>
-      ({
-        artist: 'artists',
-        'release-group': 'release-groups',
-        release: 'releases',
-        recording: 'recordings',
-        work: 'works',
-        label: 'labels',
-      })[type],
-  },
 }));
 
 const { searchEntitiesTool } = await import(
@@ -34,6 +24,197 @@ const { searchEntitiesTool } = await import(
 afterEach(() => searchMock.mockReset());
 
 describe('search_entities', () => {
+  it('returns edition metadata reported on release search rows', async () => {
+    searchMock.mockResolvedValueOnce({
+      count: 1,
+      releases: [
+        {
+          id: 'edition',
+          title: 'OK Computer',
+          score: 100,
+          status: 'Official',
+          country: 'FR',
+          date: '1997-06-16',
+          barcode: '0724385522925',
+          packaging: 'Jewel Case',
+          'release-group': { id: 'album' },
+          'track-count': 12,
+          media: [{ format: 'CD' }],
+          'label-info': [{ 'catalog-number': '55229', label: { name: 'Parlophone' } }],
+          'release-events': [
+            { date: '1997-06', area: null },
+            { area: { 'iso-3166-1-codes': ['XE'] } },
+          ],
+        },
+      ],
+    });
+    const result = await runToolContract(searchEntitiesTool, {
+      entityType: 'release',
+      query: 'barcode:0724385522925',
+    });
+    expect(result.structuredContent).toMatchObject({
+      results: [
+        {
+          status: 'Official',
+          country: 'FR',
+          date: '1997-06-16',
+          barcode: '0724385522925',
+          packaging: 'Jewel Case',
+          releaseGroupId: 'album',
+          trackCount: 12,
+          formats: ['CD'],
+          labelInfo: [{ catalogNumber: '55229', labelName: 'Parlophone' }],
+          releaseEvents: [{ date: '1997-06' }, { country: 'XE' }],
+        },
+      ],
+    });
+    const text = JSON.stringify(result.content);
+    for (const value of [
+      'FR',
+      '1997-06-16',
+      '0724385522925',
+      'Jewel Case',
+      'Release group:** album',
+      'Track count:** 12',
+      'Formats:** CD',
+      'Parlophone cat# 55229',
+      'Release events:** 1997-06, XE',
+    ])
+      expect(text).toContain(value);
+  });
+
+  it('preserves ranked area hits, their ISO code families, and immediate parents', async () => {
+    searchMock.mockResolvedValueOnce({
+      count: 2,
+      areas: [
+        {
+          id: 'current',
+          name: 'Portland',
+          type: 'City',
+          score: 100,
+          disambiguation: ' Oregon ',
+          'iso-3166-1-codes': ['US'],
+          'iso-3166-2-codes': ['US-OR'],
+          'iso-3166-3-codes': [],
+          'relation-list': [
+            {
+              relations: [
+                {
+                  type: 'part of',
+                  direction: 'forward',
+                  area: { id: 'child', name: 'Child district' },
+                },
+                {
+                  type: 'part of',
+                  direction: 'backward',
+                  area: { id: 'multnomah', name: 'Multnomah County' },
+                },
+              ],
+            },
+            {
+              relations: [
+                { type: 'part of', direction: 'backward', area: null },
+                {
+                  type: 'part of',
+                  direction: 'backward',
+                  area: { id: 'washington', name: 'Washington County' },
+                },
+              ],
+            },
+            { relations: null },
+          ],
+        },
+        {
+          id: 'historical',
+          name: 'Historical area',
+          type: null,
+          score: 85,
+          'iso-3166-3-codes': ['SUHH'],
+          'relation-list': null,
+        },
+      ],
+    });
+    const result = await runToolContract(searchEntitiesTool, {
+      entityType: 'area',
+      query: 'area:portland',
+    });
+    expect(result.structuredContent).toMatchObject({
+      entityType: 'area',
+      totalCount: 2,
+      notice: expect.stringContaining('link.area'),
+    });
+    expect((result.structuredContent as { results: unknown[] }).results).toEqual([
+      {
+        mbid: 'current',
+        name: 'Portland',
+        type: 'City',
+        score: 100,
+        disambiguation: 'Oregon',
+        iso3166_1: ['US'],
+        iso3166_2: ['US-OR'],
+        partOf: [
+          { mbid: 'multnomah', name: 'Multnomah County' },
+          { mbid: 'washington', name: 'Washington County' },
+        ],
+      },
+      { mbid: 'historical', name: 'Historical area', score: 85, iso3166_3: ['SUHH'] },
+    ]);
+    const text = JSON.stringify(result.content);
+    expect(text).toContain('link.area');
+    expect(text).toContain('musicbrainz_browse_entities');
+    expect(text).toContain('ISO 3166-1:** US');
+    expect(text).toContain('ISO 3166-2:** US-OR');
+    expect(text).toContain('ISO 3166-3:** SUHH');
+    expect(text).toContain('Multnomah County — multnomah');
+    expect(text).toContain('Washington County — washington');
+    expect(text).not.toContain('Child district');
+  });
+
+  it.each([
+    [0, 0, 'No area matched'],
+    [5, 7, 'exhausted'],
+  ])(
+    'retains area search paging notices for total %s at offset %s',
+    async (count, offset, notice) => {
+      searchMock.mockResolvedValueOnce({ count });
+      const result = await runToolContract(searchEntitiesTool, {
+        entityType: 'area',
+        query: 'area:seattle',
+        offset,
+      });
+      expect(result.structuredContent).toMatchObject({
+        results: [],
+        totalCount: count,
+        notice: expect.stringContaining(notice),
+      });
+      const text = JSON.stringify(result.content);
+      expect(text).toContain(notice);
+      expect(text).not.toContain('link.area');
+    },
+  );
+
+  it.each([
+    [2, undefined, 'offset=1'],
+    [2000, 499, '500-match search window'],
+  ])('keeps area browse guidance alongside paging for total %s', async (count, offset, paging) => {
+    searchMock.mockResolvedValueOnce({
+      count,
+      areas: [{ id: '10adc6b5-63bf-4b4e-993e-ed83b05c22fc', name: 'Seattle', score: 100 }],
+    });
+    const result = await runToolContract(searchEntitiesTool, {
+      entityType: 'area',
+      query: 'area:seattle',
+      limit: 101,
+      ...(offset === undefined ? {} : { offset }),
+    });
+    const notice = (result.structuredContent as { notice?: string }).notice;
+    const content = JSON.stringify(result.content);
+    for (const value of ['clamped to 100', paging, 'link.area', 'musicbrainz_browse_entities']) {
+      expect(notice).toContain(value);
+      expect(content).toContain(value);
+    }
+  });
+
   it.each([
     [400, 100, 100],
     [490, undefined, 10],
@@ -61,6 +242,7 @@ describe('search_entities', () => {
     });
     const text = JSON.stringify(result.content);
     expect(text).not.toContain('offset=500');
+    expect(text).not.toContain('link.area');
     expect(text).toContain('musicbrainz_browse_entities');
     if (limit === 101) {
       expect(text).toContain('clamped to 100');

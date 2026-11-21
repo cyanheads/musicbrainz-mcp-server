@@ -171,6 +171,13 @@ describe('track-specific credits', () => {
       expect(text(first)).toContain(value);
     expect(text(first)).not.toContain('Recording Artist');
     expect(text(first)).not.toContain('Unknown artist');
+    const headings = text(first)
+      .split('\n')
+      .filter((line) => line.startsWith('### '));
+    expect(headings).toEqual(['### Artist credit', '### Medium 1 (3 tracks)']);
+    expect(text(first)).toMatch(
+      /Credited[^\n]*\n {2}- Canonical One[^\n]*\n {2}- Canonical Two[^\n]*\n- #2\. Absent/,
+    );
     const second = await runToolContract(getReleaseTool, {
       mbid: MBID,
       media_limit: 1,
@@ -187,6 +194,11 @@ describe('track-specific credits', () => {
       ],
     });
     expect(text(second)).toContain('Guest Alias');
+    expect(
+      text(second)
+        .split('\n')
+        .filter((line) => line.startsWith('### ')),
+    ).toEqual(['### Artist credit', '### Medium 2']);
     const exhausted = await runToolContract(getReleaseTool, { mbid: MBID, media_offset: 2 });
     expect(exhausted.structuredContent).toMatchObject({ media: [], mediaTotal: 2, trackTotal: 4 });
     expect(text(exhausted)).not.toContain('performer-one');

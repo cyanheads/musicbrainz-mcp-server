@@ -8,8 +8,14 @@
  * @module services/musicbrainz/types
  */
 
-/** The six core entity types addressable by MBID across search, lookup, and browse. */
+/** Entity types supported by lookup and browse. */
 export type EntityType = 'artist' | 'release-group' | 'release' | 'recording' | 'work' | 'label';
+
+/** Area adds name discovery without adding an area lookup or browse target. */
+export type SearchEntityType = EntityType | 'area';
+
+/** MusicBrainz's artist release-group browse visibility filter. */
+export type ReleaseGroupStatus = 'website-default' | 'all';
 
 /** Parent link types for the browse endpoint (one parent MBID per browse call). */
 export type BrowseLink =
@@ -52,6 +58,21 @@ export interface RawArea {
   'sort-name'?: string;
 }
 
+/** Area search nests containment links in relation-list, unlike lookup relations. */
+export interface RawAreaSearchHit extends RawArea {
+  disambiguation?: string | null;
+  id: string;
+  'iso-3166-2-codes'?: string[] | null;
+  'iso-3166-3-codes'?: string[] | null;
+  'relation-list'?:
+    | {
+        relations?: { area?: RawArea | null; direction?: string; type?: string }[] | null;
+      }[]
+    | null;
+  score?: number;
+  type?: string | null;
+}
+
 /** One credited artist within an artist-credit array; `joinphrase` stitches collaborations. */
 export interface RawArtistCredit {
   artist?: {
@@ -79,6 +100,7 @@ export interface RawRelation {
   label?: { id?: string; name?: string; disambiguation?: string | null };
   'ordering-key'?: number | null;
   recording?: { id?: string; title?: string; disambiguation?: string | null };
+  release?: { id?: string; title?: string; disambiguation?: string | null };
   'target-type'?: string;
   type?: string;
   'type-id'?: string;
@@ -184,12 +206,14 @@ export interface RawRelease {
   packaging?: string | null;
   'packaging-id'?: string | null;
   relations?: RawRelation[];
+  'release-events'?: { date?: string | null; area?: RawArea | null }[];
   'release-group'?: RawReleaseGroup;
   score?: number;
   status?: string | null;
   'status-id'?: string | null;
   'text-representation'?: { language?: string | null; script?: string | null };
   title?: string;
+  'track-count'?: number;
 }
 
 export interface RawRecording {
@@ -248,10 +272,11 @@ export interface RawLabel {
 
 /**
  * Search response envelope. The entity array is keyed by the pluralized type
- * (`artists`, `release-groups`, `releases`, `recordings`, `works`, `labels`).
+ * (`areas`, `artists`, `release-groups`, `releases`, `recordings`, `works`, `labels`).
  * `count` is total matches; per-result `score` is 0–100 Lucene relevance.
  */
 export interface SearchEnvelope {
+  areas?: RawAreaSearchHit[];
   artists?: RawArtist[];
   count?: number;
   created?: string;

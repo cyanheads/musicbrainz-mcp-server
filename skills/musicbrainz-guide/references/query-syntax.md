@@ -15,6 +15,7 @@ Use these expressions with `musicbrainz_search_entities`. Choose the entity inde
 | Recording | `recording:"Creep" AND arid:a74b1b7f-71a5-4011-9441-d0b5e4122711` |
 | Work | `work:"Bohemian Rhapsody"` |
 | Label | `label:"Warp" AND country:GB` |
+| Area | `area:seattle` |
 
 `arid` is an artist MBID; `rgid` is a release-group MBID. Replace example IDs with the identity resolved for the task. Search `primarytype` and `secondarytype` are distinct fields; browse filters have their own schema and do not accept Lucene expressions. Recording `firstreleasedate` concerns earliest release, not recording-session time.
 

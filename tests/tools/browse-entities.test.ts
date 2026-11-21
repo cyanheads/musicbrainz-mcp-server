@@ -7,11 +7,9 @@ import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const browse = vi.fn();
-vi.mock('@/services/musicbrainz/musicbrainz-service.js', () => ({
+vi.mock('@/services/musicbrainz/musicbrainz-service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/musicbrainz/musicbrainz-service.js')>()),
   getMusicBrainzService: () => ({ browse }),
-  MusicBrainzService: {
-    pluralKey: (type: string) => (type === 'release' ? 'releases' : `${type}s`),
-  },
 }));
 const { browseEntitiesTool } = await import(
   '@/mcp-server/tools/definitions/browse-entities.tool.js'
@@ -139,6 +137,60 @@ describe('browse contract characterization', () => {
 });
 
 describe('browse parent and release fields', () => {
+  it('returns edition metadata without inventing an incomplete media total', async () => {
+    browse.mockResolvedValueOnce({
+      'release-count': 2,
+      releases: [
+        {
+          id: MBID,
+          title: 'Shellac edition',
+          barcode: '',
+          packaging: null,
+          media: [
+            { format: 'Shellac', 'track-count': 2 },
+            { format: 'Vinyl', 'track-count': 4 },
+          ],
+          'label-info': [{ 'catalog-number': '14', label: null }],
+        },
+        {
+          id: 'sparse-edition',
+          title: 'Sparse edition',
+          barcode: null,
+          media: [{ format: 'Vinyl', 'track-count': 5 }, { format: null }],
+          'release-events': [{ date: '1939', area: { 'iso-3166-1-codes': ['US'] } }],
+        },
+      ],
+    });
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: 'release',
+      link: { label: MBID },
+    });
+    const entities = (result.structuredContent as { entities: object[] }).entities;
+    expect(entities[0]).toMatchObject({
+      barcode: '',
+      formats: ['Shellac', 'Vinyl'],
+      trackCount: 6,
+      labelInfo: [{ catalogNumber: '14' }],
+    });
+    expect(entities[0]).not.toHaveProperty('packaging');
+    expect(entities[1]).toMatchObject({
+      formats: ['Vinyl'],
+      releaseEvents: [{ date: '1939', country: 'US' }],
+    });
+    expect(entities[1]).not.toHaveProperty('barcode');
+    expect(entities[1]).not.toHaveProperty('trackCount');
+    const text = JSON.stringify(result.content);
+    for (const value of [
+      'None (confirmed)',
+      'Shellac, Vinyl',
+      'Track count:** 6',
+      'cat# 14',
+      '1939 (US)',
+    ]) {
+      expect(text).toContain(value);
+    }
+  });
+
   it.each([
     [
       'release-group',

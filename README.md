@@ -62,11 +62,12 @@ The `get_*` tools provide normalized lookup views for tool-only clients. The ent
 
 ### `musicbrainz_search_entities` <sub>tool</sub>
 
-- One `entityType` per call (`artist`, `release-group`, `release`, `recording`, `work`, `label`) and a Lucene `query` with field scoping (`artist:radiohead AND country:GB`); positive integer `limit` (default 25, values above 100 clamp to 100 with a notice), `offset` for paging
+- One `entityType` per call (`artist`, `release-group`, `release`, `recording`, `work`, `label`, `area`) and a Lucene `query` with field scoping (`artist:radiohead AND country:GB`); positive integer `limit` (default 25, values above 100 clamp to 100 with a notice), `offset` for paging
 - Returns the effective `offset` and upstream `totalCount`. Continuation uses `offset + rows returned`, including short pages. An empty page at or beyond a positive total reports exhaustion; an unexpectedly empty page before the total reports the discrepancy without suggesting a nonadvancing offset
 - Search exposes only the first 500 matches. A page crossing that boundary is shortened with a notice; offsets of 500 or more fail as `search_window_exceeded`. Narrow the query or browse a linked set to reach further matches; `totalCount` remains the full upstream count
-- Each hit carries `mbid`, `name`, and the raw 0–100 `score` in MusicBrainz order, plus type-specific fields such as `artistCredit`, `isrcs`, `iswcs`, and `length`. Release rows use `status` (Official, Bootleg, …); artist, release-group, work, and label subtypes use `type`. A whitespace-only query fails as `blank_query`
-- Release-group hits also carry available `secondaryTypes`; recording hits carry available `firstReleaseDate`, including partial dates
+- Each hit carries `mbid`, `name`, and the raw 0–100 `score` in MusicBrainz order, plus type-specific fields such as `artistCredit`, `isrcs`, `iswcs`, and `length`. Release rows use `status` (Official, Bootleg, …); artist, release-group, work, label, and area subtypes use `type`. A whitespace-only query fails as `blank_query`
+- Release-group hits carry available `secondaryTypes`, and recording hits carry available `firstReleaseDate`. Area hits carry available ISO codes and immediate `partOf` parents. Pass the selected area MBID to browse as `link.area`.
+- Release search, release browse, and barcode lookup include available catalog numbers, labels, formats, track counts, barcode, packaging, release-group MBID, and release events. Compare these fields across candidates to identify a pressing.
 
 ---
 
@@ -74,6 +75,7 @@ The `get_*` tools provide normalized lookup views for tool-only clients. The ent
 
 - `mbid`, plus `inc_release_groups` and `inc_relationships` (both default `true`) to drop the heavier sub-resources
 - Type, gender, country, area, `lifeSpan`, aliases, and tags, plus `releaseGroups` (one page), `relationships` (band membership, collaborations), and `externalLinks` (Wikidata, Discogs, official site)
+- Use `credits=release` or `credits=recording` for engineering, production, and session credits. Filter by `credit_types` (for example `producer|engineer|mix`) and page the filtered list with `credits_offset` and `credits_limit` (default 25, maximum 100).
 - `areaId` can be passed to browse `link.area`; `beginArea` and `endArea` retain available MBID/name members. `ipis` and `isnis` preserve the catalog's identifier strings, including leading zeros
 
 ---
@@ -91,13 +93,13 @@ The `get_*` tools provide normalized lookup views for tool-only clients. The ent
 - `mbid`, `media_offset` (default 0), and `media_limit` (default 20, no maximum); returns ordered `media` with complete tracks per medium (`position`, `title`, `length` as m:ss, `recordingId`), `labelInfo` (label and `catalogNumber`), `barcode`, `status`, `date`, `country`, `packaging`, `language`/`script`, and `releaseGroupId`
 - `mediaTotal` and `trackTotal` count all normalized media and track occurrences; upstream per-medium `trackCount` is preserved. `mediaOffset` identifies the window. When more media remain, `truncated`, `shown`, `cap`, and a notice give the next `media_offset`; empty end pages report exhaustion. The release resource retains the complete raw tracklist
 - `coverArt` is the availability stub from the release record; call `musicbrainz_get_cover_art` for image URLs
-- Tracks retain their own available `artistCredit` and `artistCreditString`, independently of release or recording credits. `externalLinks` belongs to the selected edition
+- Tracks retain their own available `artistCredit` and `artistCreditString`, independently of release or recording credits. Edition `relationships` include artist and label credits such as mastering and pressing. `releaseEvents` preserves the available dates and countries for that edition.
 
 ---
 
 ### `musicbrainz_get_recording` <sub>tool</sub>
 
-- `mbid`, plus `inc_relationships` (default `true`) for performer, producer, and engineer credits, work links, recording-to-recording relationships such as samples and remixes, and external links
+- `mbid`, plus `inc_relationships` (default `true`) for performer, producer, engineer, and phonographic copyright credits, work links, recording-to-recording relationships such as samples and remixes, and external links
 - Returns `length`, `isrcs`, `artistCredit`, `firstReleaseDate`, one upstream page of `releases` (up to 25), `relationships`, and `externalLinks`
 - `releaseAppearanceSummary` reports `shown`, `cap: 25`, and `completeness`: a short present page is `complete`, a full or absent page without an exact count is `unknown`, and an exact upstream count exceeding the returned page proves `truncated`. `totalCount` is omitted when unknown; no count request is added. Enumerate appearances with `musicbrainz_browse_entities` (`target_type=release`, `link.recording=<mbid>`, `offset=0`), because embedded and browse order may differ
 
@@ -105,7 +107,7 @@ The `get_*` tools provide normalized lookup views for tool-only clients. The ent
 
 ### `musicbrainz_get_work` <sub>tool</sub>
 
-- `mbid`, plus `inc_relationships` (default `true`) for writer, composer, and lyricist credits, movements and arrangements, the recordings that perform it, and external links
+- `mbid`, plus `inc_relationships` (default `true`) for writer, composer, lyricist, and publisher credits, movements and arrangements, the recordings that perform it, and external links
 - Returns `type`, `languages`, `iswcs`, aliases, and tags. Only the first 25 recording relationships are kept (other relationships and links are all kept); `totalCount` gives the full count, and `truncated`, `shown`, and `cap` appear when some were cut
 - `attributes` preserves ordered type/value rows, including musical key, catalogue metadata and society work IDs. Repeated types and exact string values are retained, even with relationships disabled
 - To list every recording of a work, browse `recording` by `work`, then call `musicbrainz_get_recording` for relationship attributes and dates
@@ -122,7 +124,7 @@ The `get_*` tools provide normalized lookup views for tool-only clients. The ent
 
 ### `musicbrainz_lookup_identifier` <sub>tool</sub>
 
-- `id_type` `isrc` → recordings, `iswc` → works, `barcode` → releases; a barcode is UPC/EAN digits and returns up to 25 ranked matches, each with a `score`
+- `id_type` `isrc` → recordings, `iswc` → works, `barcode` → releases; a barcode is UPC/EAN digits and returns up to 25 ranked matches, each with a `score`. The barcode result reports the upstream total and continuation guidance when more matches are available
 - ISRC accepts compact `GBAYE9701274` or printed `GB-AYE-97-01274`, ignoring case and surrounding whitespace. ISWC accepts `T-010.140.236-1` or `T0101402361`, with optional group punctuation, ignoring whitespace and case. Results echo the canonical compact ISRC or `T-DDD.DDD.DDD-C` ISWC; malformed codes fail before a request
 - `result.kind` (`recordings` | `works` | `releases`) names the arm that came back; failures are `invalid_identifier` or `identifier_not_found`
 
@@ -136,7 +138,8 @@ The `get_*` tools provide normalized lookup views for tool-only clients. The ent
 - Rows retain available release-group `secondaryTypes` and recording `firstReleaseDate`. `Album` alone does not distinguish studio albums from live albums or compilations
 - Optional `type` and `status` filters accept pipe-separated values with case and surrounding token whitespace normalized, echoed as `type`/`status`. Primary types union; primary and secondary categories intersect. Release-group-by-artist requires every supplied secondary type. Empty optional filters are ignored; unsupported target/parent combinations and invalid tokens fail as `invalid_filter` before fetching
 - `type` is supported for release-groups by artist, and releases by artist, label, recording, or `track_artist`. `status` is supported for those release parents plus release-group. Area browse supports neither filter. Preserve applied filters when paging
-- `link.track_artist` finds releases crediting an artist on tracks but not in the release credit. Obtain area MBIDs from `get_artist` or `get_label` `areaId`; those tools do not resolve arbitrary area MBIDs
+- `link.track_artist` finds releases crediting an artist on tracks but not in the release credit. Resolve an area by name with `musicbrainz_search_entities` or use a returned `areaId`.
+- On release-group browse by artist, set `release_group_status=website-default` for the artist page’s filtered discography. Omission and `all` use the full discography.
 
 | Target | Accepted parent keys |
 |:---|:---|
@@ -235,7 +238,7 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
 ### Local development
 
-Requires [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
+Requires [Bun v1.4.4](https://bun.sh/) or higher (or Node.js v24+).
 
 ```sh
 git clone https://github.com/cyanheads/musicbrainz-mcp-server.git

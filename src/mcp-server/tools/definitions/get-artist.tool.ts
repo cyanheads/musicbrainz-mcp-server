@@ -1,9 +1,8 @@
 /**
  * @fileoverview musicbrainz_get_artist — artist profile by MBID: type, country,
  * life span, gender, area, aliases, tags/genres, plus discography (release-groups)
- * and band-membership / collaboration relationships and external links. The 80%
- * artist-detail call. Release-groups embed one upstream page; relationships do
- * not. musicbrainz_browse_entities enumerates the full release-group set.
+ * and band-membership / collaboration relationships and external links. Release
+ * and recording credit relationships are opt-in and paged independently.
  * @module mcp-server/tools/definitions/get-artist.tool
  */
 
@@ -34,6 +33,8 @@ import {
 
 /** One page cap for lookup `inc` embedded lists (25 default / 100 max, no deep offset). */
 const LOOKUP_PAGE_CAP = 25;
+const DEFAULT_CREDITS_LIMIT = 25;
+const MAX_CREDITS_LIMIT = 100;
 
 const AreaRefSchema = z
   .object({
@@ -62,7 +63,7 @@ const ReleaseGroupRefSchema = z
 export const getArtistTool = tool('musicbrainz_get_artist', {
   title: 'musicbrainz-mcp-server: get artist',
   description:
-    'Artist profile by MBID: type, country, life span, gender, area with areaId, birth/formation and death/dissolution areas, IPI/ISNI identifiers, aliases, tags/genres, release-groups, band-membership / collaboration relationships, and external links. Chain areaId into musicbrainz_browse_entities link.area. Release-groups embed one upstream page (25); relationships are not capped. For the complete release-group list, call musicbrainz_browse_entities with target_type=release-group and link.artist.',
+    'Artist profile by MBID: type, country, life span, gender, area with areaId, birth/formation and death/dissolution areas, IPI/ISNI identifiers, aliases, tags/genres, release-groups, band-membership / collaboration relationships, and external links. Chain areaId into musicbrainz_browse_entities link.area. Release-groups embed one upstream page (25); profile relationships are uncapped. Browse target_type=release-group with link.artist for the full discography. Set credits=release or credits=recording to page production, engineering and session credit relationships independently of the profile.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -78,6 +79,13 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       when: 'The MBID is well-formed but no artist exists with it (MusicBrainz returns HTTP 404).',
       recovery:
         'No artist exists with that MBID. Verify the ID, or search by name with musicbrainz_search_entities.',
+    },
+    {
+      reason: 'invalid_credit_filter',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'Credit filtering or paging is supplied without a credit mode, or credit_types contains an empty role.',
+      recovery:
+        'Set credits to release or recording. Separate nonempty credit types with | or omit credit_types to include all roles.',
     },
   ],
 
@@ -96,6 +104,33 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       .default(true)
       .describe(
         'Include band-membership / collaboration relationships and external links (url-rels).',
+      ),
+    credits: z
+      .enum(['release', 'recording'])
+      .optional()
+      .describe('Opt in to relationship credits for this target entity type.'),
+    credit_types: z
+      .string()
+      .optional()
+      .describe(
+        'With credits, match role names case-insensitively, separated by | (e.g. producer|engineer|mix). Omit for all roles.',
+      ),
+    credits_offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Zero-based credit offset after filtering. Defaults to 0 when credits are requested.',
+      ),
+    credits_limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_CREDITS_LIMIT)
+      .optional()
+      .describe(
+        `Maximum credit rows per page. Defaults to ${DEFAULT_CREDITS_LIMIT}; maximum ${MAX_CREDITS_LIMIT}.`,
       ),
   }),
 
@@ -145,6 +180,12 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       .describe(
         'External resource links (url-rels) — Wikidata, Discogs, official site (may be empty).',
       ),
+    credits: z
+      .array(RelationSchema)
+      .optional()
+      .describe(
+        'Current page of requested credit relationships, in upstream order. Omitted unless requested.',
+      ),
   }),
 
   enrichment: {
@@ -163,15 +204,37 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       .optional()
       .describe('The one-page cap that was applied. Absent when not truncated.'),
     notice: z.string().optional().describe('How to fetch the complete discography when truncated.'),
+    creditsOffset: z
+      .number()
+      .optional()
+      .describe('Zero-based offset of the requested credit page.'),
+    totalCount: z
+      .number()
+      .optional()
+      .describe('Number of matching credit rows in the lookup before paging.'),
+    creditsNotice: z.string().optional().describe('Credit continuation or empty-page guidance.'),
   },
 
   async handler(input, ctx) {
+    if (
+      !input.credits &&
+      (input.credit_types !== undefined ||
+        input.credits_offset !== undefined ||
+        input.credits_limit !== undefined)
+    ) {
+      throw ctx.fail('invalid_credit_filter');
+    }
+    const roles = input.credit_types?.split('|').map((role) => role.trim().toLowerCase());
+    if (roles?.includes('')) throw ctx.fail('invalid_credit_filter');
+
     ctx.log.info('musicbrainz_get_artist', { mbid: input.mbid });
     const service = getMusicBrainzService();
 
     const inc: string[] = ['aliases', 'tags', 'genres'];
     if (input.inc_release_groups) inc.push('release-groups');
     if (input.inc_relationships) inc.push('artist-rels', 'url-rels');
+    const creditTarget = input.credits;
+    if (creditTarget) inc.push(`${creditTarget}-rels`);
 
     let raw: RawArtist;
     try {
@@ -187,7 +250,41 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       throw error;
     }
 
-    const { relationships, externalLinks } = normalizeRelations(raw.relations);
+    let profileRelations = raw.relations;
+    if (creditTarget) {
+      profileRelations = input.inc_relationships
+        ? raw.relations?.filter(
+            (relation) => relation['target-type'] === 'artist' || relation['target-type'] === 'url',
+          )
+        : undefined;
+    }
+    const { relationships, externalLinks } = normalizeRelations(profileRelations);
+    let credits: z.infer<typeof RelationSchema>[] | undefined;
+    if (creditTarget) {
+      const creditRoles = roles ? new Set(roles) : undefined;
+      const matching = (raw.relations ?? []).filter(
+        (relation) =>
+          relation['target-type'] === creditTarget &&
+          (!creditRoles ||
+            (relation.type !== undefined && creditRoles.has(relation.type.toLowerCase()))),
+      );
+      const offset = input.credits_offset ?? 0;
+      const limit = input.credits_limit ?? DEFAULT_CREDITS_LIMIT;
+      const total = matching.length;
+      credits = normalizeRelations(matching.slice(offset, offset + limit)).relationships;
+      ctx.enrich({ creditsOffset: offset, totalCount: total });
+      if (total === 0) {
+        ctx.enrich({ creditsNotice: `No ${creditTarget} credit relationships match this lookup.` });
+      } else if (offset >= total) {
+        ctx.enrich({
+          creditsNotice: `Credit page exhausted: credits_offset=${offset} is at or beyond the total of ${total}. Request a lower credits_offset to retrieve matches.`,
+        });
+      } else if (offset + credits.length < total) {
+        ctx.enrich({
+          creditsNotice: `Call again with credits_offset=${offset + credits.length} and the same credit mode, filter and limit to continue.`,
+        });
+      }
+    }
     const releaseGroups = (raw['release-groups'] ?? []).map((rg) => ({
       mbid: rg.id,
       title: rg.title ?? '',
@@ -202,7 +299,7 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
     if (input.inc_release_groups && releaseGroups.length >= LOOKUP_PAGE_CAP) {
       ctx.enrich.truncated({ shown: releaseGroups.length, cap: LOOKUP_PAGE_CAP });
       ctx.enrich.notice(
-        `Discography capped at ${LOOKUP_PAGE_CAP}. Call musicbrainz_browse_entities (target_type=release-group, link.artist=${input.mbid}) to enumerate the complete set.`,
+        `Discography capped at ${LOOKUP_PAGE_CAP}. Call musicbrainz_browse_entities (target_type=release-group, link.artist=${input.mbid}) to enumerate the complete set. Use release_group_status=website-default to match the MusicBrainz website's discography filter.`,
       );
     }
 
@@ -240,6 +337,7 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
       releaseGroups,
       relationships,
       externalLinks,
+      ...(credits ? { credits } : {}),
     };
   },
 
@@ -292,6 +390,7 @@ export const getArtistTool = tool('musicbrainz_get_artist', {
     }
     lines.push(...renderRelationships(result.relationships));
     lines.push(...renderExternalLinks(result.externalLinks));
+    if (result.credits) lines.push(...renderRelationships(result.credits, 'Credits'));
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });

@@ -37,6 +37,8 @@ import type {
   CallOptions,
   EntityType,
   IsrcEnvelope,
+  ReleaseGroupStatus,
+  SearchEntityType,
   SearchEnvelope,
 } from './types.js';
 
@@ -53,14 +55,15 @@ function cacheKey(prefix: string, path: string): string {
 }
 
 /** Pluralized search/browse array keys, by entity type. */
-const ENTITY_PLURAL: Record<EntityType, keyof SearchEnvelope & keyof BrowseEnvelope> = {
+const ENTITY_PLURAL = {
+  area: 'areas',
   artist: 'artists',
   'release-group': 'release-groups',
   release: 'releases',
   recording: 'recordings',
   work: 'works',
   label: 'labels',
-};
+} as const satisfies Record<SearchEntityType, keyof SearchEnvelope>;
 
 export interface SearchParams {
   limit: number;
@@ -77,6 +80,8 @@ export interface BrowseParams {
   link: BrowseLink;
   linkMbid: string;
   offset: number;
+  /** Website visibility filter for release-group browse by artist. */
+  release_group_status?: ReleaseGroupStatus;
   /** Canonical upstream pipe-separated release statuses. */
   status?: string;
   /** Canonical upstream pipe-separated release types. */
@@ -104,7 +109,7 @@ export class MusicBrainzService {
 
   /** Full-text Lucene search over an entity type. Returns the raw search envelope. */
   search(
-    type: EntityType,
+    type: SearchEntityType,
     query: string,
     params: SearchParams,
     ctx: Context,
@@ -151,11 +156,16 @@ export class MusicBrainzService {
       offset: String(params.offset),
       fmt: 'json',
     });
-    if (target === 'release-group' || target === 'release' || target === 'recording') {
+    if (target === 'release') {
+      search.set('inc', 'artist-credits+labels+media+release-groups');
+    } else if (target === 'release-group' || target === 'recording') {
       search.set('inc', 'artist-credits');
     }
     if (params.type) search.set('type', params.type);
     if (params.status) search.set('status', params.status);
+    if (params.release_group_status) {
+      search.set('release-group-status', params.release_group_status);
+    }
     return await this.request<BrowseEnvelope & Record<`${T}-count`, number>>(
       `/${target}?${search.toString()}`,
       ctx,
@@ -208,7 +218,7 @@ export class MusicBrainzService {
   }
 
   /** Pluralized array key for an entity type — for handlers reading search/browse envelopes. */
-  static pluralKey(type: EntityType): keyof SearchEnvelope & keyof BrowseEnvelope {
+  static pluralKey<T extends SearchEntityType>(type: T): (typeof ENTITY_PLURAL)[T] {
     return ENTITY_PLURAL[type];
   }
 

@@ -4,7 +4,7 @@ description: Resolve music identities and follow musicbrainz_* tools across disc
 license: Apache-2.0
 metadata:
   author: "cyanheads"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Scope
@@ -23,10 +23,11 @@ Choose the entity before resolving its name:
 | Recording | Recorded audio that can appear on multiple releases | Recording search, release track's recording link, ISRC lookup, work relationships |
 | Work | A composition, including movements or arrangements | Work search, recording's work relationships, ISWC lookup |
 | Label | A music label | Label search, release label information, relationship targets |
+| Area | A geographic entity used as a browse parent | Area search, artist or label area references |
 
 `musicbrainz_lookup_identifier` resolves ISRCs to recordings, ISWCs to works, and barcodes to releases. Keep each returned MBID's entity type attached to it; identical UUID syntax does not make types interchangeable. Preserve identifiers as strings, including leading zeros.
 
-Area MBIDs come from an artist or label's returned `areaId`; names and country codes are not area MBIDs. IPI/ISNI identify people or organizations, while a work's society attributes identify that composition in a society's catalog.
+Use an area MBID for `link.area`. Resolve a geographic name with area search, or reuse a known artist or label’s `areaId`. IPI/ISNI identify people or organizations, while a work's society attributes identify that composition in a society's catalog.
 
 ## Gates
 
@@ -44,9 +45,9 @@ Resolve a name with `musicbrainz_search_entities`, or a supplied standard identi
 
 ### Discography and editions
 
-For an artist's albums, resolve the artist, browse release-groups, and inspect primary and secondary types. “Album” alone does not establish a studio album: live albums and compilations can share that primary type. Missing secondary types mean unclassified metadata, so qualify uncertain classifications. Keep the applied filters when continuing; pipe-separated type filters do not universally mean “either,” so follow the tool's category semantics.
+For an artist's albums, resolve the artist and browse release-groups by `link.artist` with `type=album`. Add `release_group_status=website-default` when the question calls for the discography shown on MusicBrainz’s artist page. Omit the filter for the full catalog, including bootleg-only groups. “Album” alone does not establish a studio album: live albums and compilations can share that primary type. Missing secondary types mean unclassified metadata, so qualify uncertain classifications. Keep the applied filters when continuing; pipe-separated type filters do not universally mean “either,” so follow the tool's category semantics.
 
-For a particular pressing, browse the group's releases, narrow candidates by country and date, then use `musicbrainz_get_release` to compare format, barcode, and catalog number with the user's evidence. Retrieve remaining media before reporting a complete tracklist. Recording enumeration cannot reconstruct ordered track occurrences, including repeated appearances of the same recording.
+For a particular pressing, compare the returned catalog numbers, formats, barcode, and release events across the group’s releases or a barcode search. One edition can have several country/date events. Open the matching edition with `musicbrainz_get_release`. Retrieve remaining media before reporting a complete tracklist. Recording enumeration cannot reconstruct ordered track occurrences, including repeated appearances of the same recording.
 
 ### Track credits and compositions
 
@@ -54,9 +55,11 @@ For a named track on an edition, start from `musicbrainz_get_release` and use th
 
 For performances of a composition, resolve the work, browse its recordings, and retrieve recording details where the question needs performance dates or relationship attributes. For classical parts, follow work targets and retain ordering keys and direction; do not sort movements by title or treat an arrangement as the same work without checking the relationship.
 
+For an engineer or producer’s credits, resolve the artist and request `credits=release` or `credits=recording` with `musicbrainz_get_artist`. Use `credit_types=producer|engineer|mix` to limit roles. Page the filtered results before reporting the artist’s credited catalog. For the reverse lookup, inspect the selected edition’s relationships for mastering, design, pressing, and label credits. Work relationships identify cataloged publishers, and recording relationships can identify a phonographic copyright credit.
+
 For society registrations, inspect work attributes, then follow the writer/composer's artist MBID for IPI/ISNI. Preserve repeated society entries and their string values. These are catalog identifiers, not a determination of current ownership or licensing authority.
 
-For labels or artists in an area, obtain `areaId` from a known artist or label and browse by that returned MBID. Check whether the associated area matches the user's requested geography; a birth area or country name is not a substitute for the requested area.
+For labels or artists in a named city, search `entityType=area` with a query such as `area:portland`. Use `partOf`, area type, disambiguation, and any ISO codes to choose the intended place. Pass its MBID as `link.area` to browse.
 
 ### Artwork and external identities
 

@@ -12,6 +12,13 @@ import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { getMusicBrainzService } from '@/services/musicbrainz/musicbrainz-service.js';
 import type { RawRecording, RawRelease, RawWork } from '@/services/musicbrainz/types.js';
 import { artistCreditString, formatDuration, normalizeArtistCredits, safeText } from './_shared.js';
+import {
+  mapReleaseEdition,
+  ReleaseEditionSchema,
+  renderReleaseEdition,
+} from './release-edition.js';
+
+const BARCODE_LIMIT = 25;
 
 /**
  * Classify an upstream error from a dedicated ISRC/ISWC endpoint: a malformed
@@ -59,13 +66,14 @@ const ReleaseHitSchema = z
     score: z
       .number()
       .describe('Lucene relevance score, 0–100 (barcode is a search filter; exact = 100).'),
+    ...ReleaseEditionSchema.shape,
   })
   .describe('A release carrying the looked-up barcode.');
 
 export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
   title: 'musicbrainz-mcp-server: lookup identifier',
   description:
-    'Resolve a standard identifier to MusicBrainz entities without a name search — the deterministic path when you already hold an ID. id_type=isrc → recordings (a recording-level code, often shared by several recordings); id_type=iswc → works (a composition-level code); id_type=barcode → releases (UPC/EAN digits; spaces and hyphens are ignored). ISRC and ISWC hit dedicated exact endpoints; barcode is a Lucene search filter so results are ranked (exact match scores 100). The output kind field tells you which entity type came back.',
+    'Resolve a standard identifier to MusicBrainz entities without a name search — the deterministic path when you already hold an ID. id_type=isrc → recordings (a recording-level code, often shared by several recordings); id_type=iswc → works (a composition-level code); id_type=barcode → releases (UPC/EAN digits; spaces and hyphens are ignored). ISRC and ISWC hit dedicated exact endpoints. Barcode is a ranked Lucene search filter and returns up to 25 editions with the upstream total. Follow the notice into musicbrainz_search_entities for more. The output kind field tells you which entity type came back.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -132,6 +140,7 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
             identifier: z
               .string()
               .describe('The barcode digits that were searched (spaces and hyphens removed).'),
+            totalCount: z.number().describe('Total barcode matches reported by MusicBrainz.'),
             releases: z
               .array(ReleaseHitSchema)
               .describe('Releases carrying this barcode (ranked).'),
@@ -140,6 +149,13 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       ])
       .describe('The resolved entities, discriminated by `kind` (recordings | works | releases).'),
   }),
+
+  enrichment: {
+    notice: z
+      .string()
+      .optional()
+      .describe('Release search continuation when barcode matches remain.'),
+  },
 
   async handler(input, ctx) {
     ctx.log.info('musicbrainz_lookup_identifier', { id_type: input.id_type, value: input.value });
@@ -227,10 +243,11 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
         `Barcode "${input.value}" is not a UPC/EAN — expected digits only (spaces and hyphens are ignored).`,
       );
     }
+    const query = `barcode:${barcode}`;
     const envelope = await service.search(
       'release',
-      `barcode:${barcode}`,
-      { limit: 25, offset: 0 },
+      query,
+      { limit: BARCODE_LIMIT, offset: 0 },
       ctx,
       { signal: ctx.signal },
     );
@@ -241,11 +258,24 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       ...(r.date ? { date: r.date } : {}),
       ...(r.country ? { country: r.country } : {}),
       score: typeof r.score === 'number' ? r.score : 0,
+      ...mapReleaseEdition(r),
     }));
     if (releases.length === 0) {
       throw ctx.fail('identifier_not_found', `No release carries barcode ${barcode}.`);
     }
-    return { result: { kind: 'releases' as const, identifier: barcode, releases } };
+    if (envelope.count > BARCODE_LIMIT) {
+      ctx.enrich.notice(
+        `Showing ${releases.length} of ${envelope.count} releases. Continue with musicbrainz_search_entities (entityType=release, query=${query}, offset=${releases.length}).`,
+      );
+    }
+    return {
+      result: {
+        kind: 'releases' as const,
+        identifier: barcode,
+        totalCount: envelope.count,
+        releases,
+      },
+    };
   },
 
   format: (output) => {
@@ -270,11 +300,13 @@ export const lookupIdentifierTool = tool('musicbrainz_lookup_identifier', {
       }
     } else {
       lines.push(`**Resolved to ${result.releases.length} release(s):**`);
+      lines.push(`**Total matches:** ${result.totalCount}`);
       for (const r of result.releases) {
         const meta = [r.date, r.country].filter(Boolean).join(', ');
         lines.push(
           `- **${safeText(r.title)}** — ${safeText(r.artistCredit)}${meta ? ` (${meta})` : ''} [score ${r.score}] — ${r.mbid}`,
         );
+        lines.push(...renderReleaseEdition(r));
       }
     }
     return [{ type: 'text', text: lines.join('\n') }];

@@ -118,7 +118,9 @@ export const RelationSchema = z
       .describe('Role modifiers (e.g. "lead vocals", "assistant", "co"). Omitted when none.'),
     targetType: z
       .string()
-      .describe('Type of the related entity ("artist" | "work" | "recording" | "label" | "url").'),
+      .describe(
+        'Type of the related entity (e.g. "artist", "work", "recording", "release", "label").',
+      ),
     targetId: z
       .string()
       .optional()
@@ -207,14 +209,18 @@ export function artistCreditString(credits: z.infer<typeof ArtistCreditSchema>[]
  * (credited name, canonical name, MBID, join phrase) — used by tools that expose
  * `artistCredit` as a full array in output, so format() stays parity-complete.
  */
-export function renderArtistCredits(credits: z.infer<typeof ArtistCreditSchema>[]): string[] {
+export function renderArtistCredits(
+  credits: z.infer<typeof ArtistCreditSchema>[],
+  placement: 'section' | 'track' = 'section',
+): string[] {
   if (credits.length === 0) return [];
-  const lines = ['', '### Artist credit'];
+  const lines = placement === 'section' ? ['', '### Artist credit'] : [];
+  const bullet = placement === 'section' ? '- ' : '  - ';
   for (const c of credits) {
     const credited =
       c.name && c.name !== c.artistName ? ` (credited as ${safeText(`"${c.name}"`)})` : '';
     const join = c.joinPhrase ? ` + join ${safeText(`"${c.joinPhrase}"`)}` : '';
-    lines.push(`- ${safeText(c.artistName)}${credited} — ${c.artistId}${join}`);
+    lines.push(`${bullet}${safeText(c.artistName)}${credited} — ${c.artistId}${join}`);
   }
   return lines;
 }
@@ -270,11 +276,14 @@ function relationTarget(rel: RawRelation): { id?: string; name?: string; disambi
         ...(rel.work?.disambiguation && { disambiguation: rel.work.disambiguation }),
       };
     case 'recording':
+    case 'release': {
+      const target = rel[rel['target-type']];
       return {
-        ...(rel.recording?.id && { id: rel.recording.id }),
-        ...(rel.recording?.title && { name: rel.recording.title }),
-        ...(rel.recording?.disambiguation && { disambiguation: rel.recording.disambiguation }),
+        ...(target?.id && { id: target.id }),
+        ...(target?.title && { name: target.title }),
+        ...(target?.disambiguation && { disambiguation: target.disambiguation }),
       };
+    }
     case 'label':
       return {
         ...(rel.label?.id && { id: rel.label.id }),
@@ -374,9 +383,12 @@ export function safeUrl(value: string): string {
   return value.replace(CONTROL_OR_LINE_SEPARATOR, ' ').trim();
 }
 
-export function renderRelationships(rels: z.infer<typeof RelationSchema>[]): string[] {
+export function renderRelationships(
+  rels: z.infer<typeof RelationSchema>[],
+  heading: 'Relationships' | 'Credits' = 'Relationships',
+): string[] {
   if (rels.length === 0) return [];
-  const lines = ['', '### Relationships'];
+  const lines = ['', `### ${heading}`];
   for (const r of rels) {
     const attrs = r.attributes?.length ? ` (${r.attributes.map(safeText).join(', ')})` : '';
     const target = safeText(r.targetName ?? r.targetId ?? r.targetType);

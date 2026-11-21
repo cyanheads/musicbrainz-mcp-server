@@ -374,4 +374,55 @@ describe('get_work', () => {
       expect(JSON.stringify(result.content)).toContain('John Lennon');
     },
   );
+
+  it('preserves work publishers beyond the recording cap in tools and resources', async () => {
+    const publisher = {
+      type: 'publishing',
+      direction: 'backward',
+      'target-type': 'label',
+      label: { id: 'northern', name: 'Northern Songs Ltd.' },
+      begin: '1967',
+      end: null,
+      'ordering-key': 0,
+    } satisfies RawRelation;
+    const recordings = Array.from(
+      { length: 26 },
+      (_, index): RawRelation => ({
+        type: 'performance',
+        'target-type': 'recording',
+        recording: { id: `recording-${index}` },
+      }),
+    );
+    lookupMock.mockResolvedValue({ ...fullWork, relations: [...recordings, publisher] });
+    const result = await runToolContract(getWorkTool, { mbid: fullWork.id });
+    expect(lookupMock.mock.calls[0]?.[2].inc).toContain('label-rels');
+    expect(result.structuredContent).toMatchObject({ totalCount: 26, truncated: true, shown: 25 });
+    expect(getWorkTool.output.parse(result.structuredContent).relationships).toHaveLength(26);
+    expect(result.structuredContent).toHaveProperty('relationships.25', {
+      type: 'publishing',
+      direction: 'backward',
+      targetType: 'label',
+      targetId: 'northern',
+      targetName: 'Northern Songs Ltd.',
+      begin: '1967',
+      orderingKey: 0,
+    });
+    expect(JSON.stringify(result.content)).toContain(
+      'Northern Songs Ltd. (northern) [1967] [ordering key: 0]',
+    );
+    const resource = await entityResource.handler(
+      entityResource.params!.parse({ entity_type: 'work', mbid: fullWork.id }),
+      createMockContext({ errors: entityResource.errors }),
+    );
+    expect(lookupMock.mock.calls[1]?.[2].inc).toContain('label-rels');
+    expect(resource).toMatchObject({ relations: [...recordings.slice(0, 25), publisher] });
+    const disabled = await runToolContract(getWorkTool, {
+      mbid: fullWork.id,
+      inc_relationships: false,
+    });
+    expect(disabled.structuredContent).toMatchObject({ relationships: [], externalLinks: [] });
+    expect(JSON.stringify(disabled.content)).not.toContain('Northern Songs');
+    expect(lookupMock.mock.calls[2]?.[2].inc).not.toContain('label-rels');
+    expect(lookupMock).toHaveBeenCalledTimes(3);
+  });
 });

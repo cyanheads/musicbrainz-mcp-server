@@ -90,6 +90,32 @@ describe('MusicBrainzService', () => {
     expect(urls[2]!.searchParams.get('status')).toBe('official|withdrawn');
     for (const url of urls) expect(url.searchParams.get('track_artist')).toBe(base.linkMbid);
   });
+  it('keeps release-group visibility filters separate in the browse cache', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ 'release-group-count': 388 }))
+      .mockResolvedValueOnce(jsonResponse({ 'release-group-count': 28 }))
+      .mockResolvedValueOnce(jsonResponse({ 'release-group-count': 388 }));
+    const service = makeService(3600);
+    const ctx = realStorageContext();
+    const params = {
+      link: 'artist' as const,
+      linkMbid: 'a74b1b7f-71a5-4011-9441-d0b5e4122711',
+      limit: 25,
+      offset: 0,
+    };
+    for (const [filter, total] of [
+      [undefined, 388],
+      ['website-default', 28],
+      ['all', 388],
+      ['website-default', 28],
+    ] as const) {
+      const filters = filter === undefined ? {} : { release_group_status: filter };
+      await expect(
+        service.browse('release-group', { ...params, ...filters }, ctx),
+      ).resolves.toMatchObject({ 'release-group-count': total });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
   it.each([
     'not-a-uuid',
     '00000000-0000-0000-0000-000000000000',
@@ -119,21 +145,23 @@ describe('MusicBrainzService', () => {
     );
     expect(fetchMock.mock.calls[0]![0]).toContain('/artist/abcdef12-abcd-0123-0123-abcdef123456?');
   });
-  it.each(['release-group', 'release', 'recording', 'artist', 'label', 'work'] as const)(
-    'requests artist credits only for credited browse target %s',
-    async (target) => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ [`${target}-count`]: 0 }));
-      await makeService().browse(
-        target,
-        { link: 'artist', linkMbid: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', limit: 25, offset: 0 },
-        createMockContext(),
-      );
-      const url = new URL(fetchMock.mock.calls[0]![0]);
-      expect(url.searchParams.get('inc')).toBe(
-        ['release-group', 'release', 'recording'].includes(target) ? 'artist-credits' : null,
-      );
-    },
-  );
+  it.each([
+    ['release', 'artist-credits+labels+media+release-groups'],
+    ['release-group', 'artist-credits'],
+    ['recording', 'artist-credits'],
+    ['artist', null],
+    ['label', null],
+    ['work', null],
+  ] as const)('requests metadata includes for browse target %s', async (target, includes) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ [`${target}-count`]: 0 }));
+    await makeService().browse(
+      target,
+      { link: 'artist', linkMbid: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', limit: 25, offset: 0 },
+      createMockContext(),
+    );
+    const url = new URL(fetchMock.mock.calls[0]![0]);
+    expect(url.searchParams.get('inc')).toBe(includes);
+  });
   it('parses a JSON lookup response and sends the descriptive User-Agent', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ id: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', name: 'Radiohead' }),

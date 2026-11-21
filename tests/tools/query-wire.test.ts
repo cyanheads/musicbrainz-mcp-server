@@ -22,7 +22,9 @@ import {
 let http: ReturnType<typeof createFetchMock>;
 let status = 200;
 let count: unknown = 200;
+let releaseGroups: { id: string; title: string }[];
 const parent = '1834eae1-741b-3c03-9ca5-0df3decb43ea';
+const seattle = '10adc6b5-63bf-4b4e-993e-ed83b05c22fc';
 beforeEach(() => {
   vi.stubEnv('MUSICBRAINZ_CACHE_TTL', '0');
   vi.stubEnv('MUSICBRAINZ_MAX_RETRIES', '0');
@@ -30,6 +32,7 @@ beforeEach(() => {
   initMusicBrainzService('0.2.0');
   status = 200;
   count = 200;
+  releaseGroups = [{ id: parent, title: 'Album' }];
   http = createFetchMock([
     {
       match: () => true,
@@ -37,9 +40,14 @@ beforeEach(() => {
         new Response(
           JSON.stringify({
             count,
+            'label-count': count,
             'release-count': count,
+            'release-group-count': count,
             artists: [{ id: parent, name: 'Radiohead', score: 100 }],
             releases: [{ id: parent, title: 'Edition' }],
+            'release-groups': releaseGroups,
+            areas: [{ id: seattle, name: 'Seattle', score: 100, type: 'City' }],
+            labels: [{ id: parent, name: 'Seattle label' }],
             recordings: [{ id: '4a7fea2e-545b-4c63-bc9a-9943cc3a29d7', title: 'Paranoid Android' }],
             works: [{ id: 'fd1aa4f2-ba26-3a05-b72d-4392c35a073c', title: 'A Day in the Life' }],
           }),
@@ -104,6 +112,113 @@ describe('query wire paths', () => {
       offset: 800,
     });
     expect(new URL(http.calls[1]!.request.url).searchParams.get('offset')).toBe('800');
+  });
+  it('leaves artist release-group browse unfiltered by release-group status by default', async () => {
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: 'release-group',
+      link: { artist: parent },
+      type: 'album',
+    });
+    expect(result.structuredContent).toMatchObject({ type: 'album', totalCount: 200 });
+    expect(result.structuredContent).not.toHaveProperty('release_group_status');
+    const url = new URL(http.calls[0]!.request.url);
+    expect(url.searchParams.get('inc')).toBe('artist-credits');
+    expect(url.searchParams.has('release-group-status')).toBe(false);
+  });
+  it.each(['website-default', 'all'])('forwards artist release-group status %s', async (value) => {
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: 'release-group',
+      link: { artist: parent },
+      type: 'album',
+      release_group_status: value,
+      offset: 2,
+      limit: 1,
+    });
+    expect(result.structuredContent).toMatchObject({
+      type: 'album',
+      release_group_status: value,
+      totalCount: 200,
+      notice: expect.stringContaining(`release_group_status=${value}`),
+    });
+    expect(JSON.stringify(result.content)).toContain(`release_group_status=${value}`);
+    const url = new URL(http.calls[0]!.request.url);
+    expect(url.searchParams.get('release-group-status')).toBe(value);
+    expect(url.searchParams.get('type')).toBe('album');
+    expect(url.searchParams.get('offset')).toBe('2');
+  });
+  it.each([
+    [0, 0, 'No release-group entities'],
+    [5, 6, 'exhausted'],
+  ])('reports filtered release groups at total %s and offset %s', async (total, offset, notice) => {
+    count = total;
+    releaseGroups = [];
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: 'release-group',
+      link: { artist: parent },
+      release_group_status: 'website-default',
+      offset,
+    });
+    expect(result.structuredContent).toMatchObject({
+      totalCount: total,
+      entities: [],
+      release_group_status: 'website-default',
+      notice: expect.stringContaining(notice),
+    });
+    const text = JSON.stringify(result.content);
+    expect(text).toContain('Release-group status filter:** website-default');
+    expect(text).toContain(notice);
+    expect(text).not.toContain('continue');
+  });
+  it.each([
+    ['release-group', 'release', 'website-default'],
+    ['release', 'artist', 'all'],
+    ['release-group', 'artist', 'bootleg'],
+    ['release-group', 'artist', ''],
+  ] as const)('rejects release-group status for %s by %s with %j', async (target, link, value) => {
+    const result = await runToolContract(browseEntitiesTool, {
+      target_type: target,
+      link: { [link]: parent },
+      release_group_status: value,
+    });
+    expect(result.structuredContent).toMatchObject({
+      error: { data: { reason: 'invalid_filter' } },
+    });
+    expect(JSON.stringify(result.content)).toContain('website-default');
+    expect(http.calls).toHaveLength(0);
+  });
+  it.each([
+    ['   ', 0, 'blank_query'],
+    ['area:seattle', 500, 'search_window_exceeded'],
+  ])('rejects area search query %j at offset %s with %s', async (query, offset, reason) => {
+    const result = await runToolContract(searchEntitiesTool, { entityType: 'area', query, offset });
+    expect(result.structuredContent).toMatchObject({ error: { data: { reason } } });
+    expect(JSON.stringify(result.content)).toContain('Recovery:');
+    expect(http.calls).toHaveLength(0);
+  });
+  it('reuses the area from search as a label browse parent', async () => {
+    const search = await runToolContract(searchEntitiesTool, {
+      entityType: 'area',
+      query: 'area:seattle',
+    });
+    expect(search.structuredContent).toMatchObject({
+      results: [{ mbid: seattle, name: 'Seattle', score: 100, type: 'City' }],
+    });
+    const results = (search.structuredContent as { results: { mbid: string }[] }).results;
+    const browse = await runToolContract(browseEntitiesTool, {
+      target_type: 'label',
+      link: { area: results[0]!.mbid },
+    });
+    expect(browse.structuredContent).toMatchObject({
+      linkType: 'area',
+      linkMbid: seattle,
+      entities: [{ mbid: parent, name: 'Seattle label' }],
+    });
+    expect(JSON.stringify(browse.content)).toContain('Seattle label');
+    const [searchUrl, browseUrl] = http.calls.map(({ request }) => new URL(request.url));
+    expect(searchUrl?.pathname).toBe('/ws/2/area');
+    expect(searchUrl?.searchParams.get('query')).toBe('area:seattle');
+    expect(browseUrl?.pathname).toBe('/ws/2/label');
+    expect(browseUrl?.searchParams.get('area')).toBe(seattle);
   });
   it.each([0, 400, 490, 499])('respects search window at offset %s', async (offset) => {
     count = 2000;
@@ -199,10 +314,13 @@ describe('query wire paths', () => {
     });
     expect(result.structuredContent).toMatchObject({
       error: {
-        data: { reason: 'entity_not_found', recovery: { hint: expect.stringContaining('areaId') } },
+        data: {
+          reason: 'entity_not_found',
+          recovery: { hint: expect.stringContaining('entityType=area') },
+        },
       },
     });
-    expect(JSON.stringify(result.content)).toContain('areaId');
+    expect(JSON.stringify(result.content)).toContain('entityType=area');
   });
   it.each([
     [

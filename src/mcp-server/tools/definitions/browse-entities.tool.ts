@@ -22,6 +22,7 @@ import type {
   RawRelease,
   RawReleaseGroup,
   RawWork,
+  ReleaseGroupStatus,
 } from '@/services/musicbrainz/types.js';
 import { applyPageLimit, PageLimit, pageNotice } from './_pagination.js';
 import {
@@ -32,6 +33,11 @@ import {
   normalizeArtistCredits,
   safeText,
 } from './_shared.js';
+import {
+  mapReleaseEdition,
+  ReleaseEditionSchema,
+  renderReleaseEdition,
+} from './release-edition.js';
 
 const TARGET_TYPES = ['artist', 'release-group', 'release', 'recording', 'work', 'label'] as const;
 
@@ -81,6 +87,7 @@ const EntityRefSchema = z
       .string()
       .optional()
       .describe('Recording first-release date, possibly partial. Omitted when absent.'),
+    ...ReleaseEditionSchema.shape,
   })
   .describe('A lightweight reference to a linked entity.');
 
@@ -131,22 +138,23 @@ function mapEntity(type: EntityType, raw: unknown): z.infer<typeof EntityRefSche
     artistCredit: artistCreditString(normalizeArtistCredits(e['artist-credit'])),
     ...(date ? { date } : {}),
     ...((e as RawRelease).country ? { country: (e as RawRelease).country as string } : {}),
+    ...(!isReleaseGroup ? mapReleaseEdition(e as RawRelease) : {}),
   };
 }
 
 export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
   title: 'musicbrainz-mcp-server: browse entities',
   description:
-    'Paginate entities linked to one parent MBID. Accepted parents by target: artist → area, recording, release, release-group, work; label → area, release; release-group → artist, release; release → area, artist, label, recording, release-group, track_artist; recording → artist, release, work; work → artist. track_artist enumerates releases crediting an artist on tracks but not at release level. Artist release-groups and release-group editions embed one upstream page in get_* lookups; use this tool for the complete entity set. Recording browse returns identities, not performance attributes/dates or ordered release tracks: use musicbrainz_get_recording for work relationships and musicbrainz_get_release for tracks. Provide exactly one valid parent link. offset pages to any depth; totalCount is the exact filtered upstream entity total. Optional type/status filters apply only on supported parent pairs; preserve applied filters on continuation. Release rows carry status, other entity subtypes use type; release-groups include secondaryTypes and recordings include firstReleaseDate when available.',
+    'Paginate entities linked to one parent MBID. Accepted parents by target: artist → area, recording, release, release-group, work; label → area, release; release-group → artist, release; release → area, artist, label, recording, release-group, track_artist; recording → artist, release, work; work → artist. track_artist enumerates releases crediting an artist on tracks but not at release level. Artist release-groups and release-group editions embed one upstream page in get_* lookups; use browse for the complete linked set. Recording browse returns identities; use musicbrainz_get_recording for work relationships and musicbrainz_get_release for ordered tracks. offset pages to any depth; totalCount is the exact filtered upstream total. Preserve supported type, status and release_group_status filters on continuation. For artist discographies use release_group_status=website-default to match the website overview. Release rows carry status and edition metadata, release-groups include secondaryTypes, and recordings include firstReleaseDate when available.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
     {
       reason: 'invalid_filter',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'A nonempty type/status filter has an unknown token, an empty pipe-list member, or is unsupported for the target and parent.',
+      when: 'A nonempty type/status filter has an unknown token or empty pipe-list member, release_group_status has an unsupported value, or an applied filter is unsupported for the target and parent.',
       recovery:
-        'Use type only for release-group by artist or release by artist/label/recording/track_artist; use status only for release by artist/label/recording/release-group/track_artist. Separate valid tokens with | and omit unsupported filters. Types: album, single, ep, broadcast, other, audio drama, audiobook, compilation, demo, dj-mix, field recording, interview, live, mixtape/street, remix, soundtrack, spokenword. Statuses: official, promotion, bootleg, pseudo-release, withdrawn, cancelled.',
+        'Use type only for release-group by artist or release by artist/label/recording/track_artist; use status only for release by artist/label/recording/release-group/track_artist. Separate valid type/status tokens with |. Types: album, single, ep, broadcast, other, audio drama, audiobook, compilation, demo, dj-mix, field recording, interview, live, mixtape/street, remix, soundtrack, spokenword. Statuses: official, promotion, bootleg, pseudo-release, withdrawn, cancelled. Use release_group_status (website-default or all) only for release-group by artist. Omit unsupported filters.',
     },
     {
       reason: 'invalid_link',
@@ -160,7 +168,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       code: JsonRpcErrorCode.NotFound,
       when: 'The link MBID is well-formed but no such parent entity exists (HTTP 404).',
       recovery:
-        'No parent entity exists with that MBID. For area links, obtain areaId from musicbrainz_get_artist or musicbrainz_get_label for a known artist or label; these tools do not resolve arbitrary areas. For track_artist links, verify the artist with musicbrainz_get_artist or musicbrainz_search_entities. For other parents, verify the ID with the matching musicbrainz_get_* tool or musicbrainz_search_entities.',
+        'No parent entity exists with that MBID. For area links, call musicbrainz_search_entities with entityType=area and use the result MBID, or use areaId from a known artist or label. For track_artist links, verify the artist with musicbrainz_get_artist or musicbrainz_search_entities. For other parents, verify the ID with the matching musicbrainz_get_* tool or musicbrainz_search_entities.',
     },
   ],
 
@@ -194,7 +202,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
           'Parent work MBID (artists or recordings linked to this work).',
         ),
         area: MbidInput.optional().describe(
-          'Parent area MBID (artists, labels, or releases in this area).',
+          'Parent area MBID for artists, labels, or releases. Resolve it with musicbrainz_search_entities using entityType=area.',
         ),
       })
       .catchall(z.unknown())
@@ -212,6 +220,12 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       .optional()
       .describe(
         'Pipe-separated statuses for release by artist/label/recording/release-group/track_artist: official, promotion, bootleg, pseudo-release, withdrawn, cancelled. Tokens are trimmed/lowercased and unioned; blank means absent.',
+      ),
+    release_group_status: z
+      .string()
+      .optional()
+      .describe(
+        'Release-group visibility, only for release-group by artist. website-default excludes groups with only promotional, bootleg or pseudo-releases; all includes every group. Omit for the upstream default (all).',
       ),
     limit: PageLimit,
     offset: z
@@ -240,6 +254,10 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       .string()
       .optional()
       .describe('Canonical applied pipe-separated status filter; preserve on continuation.'),
+    release_group_status: z
+      .enum(['website-default', 'all'])
+      .optional()
+      .describe('Explicit artist release-group visibility filter; preserve on continuation.'),
   }),
 
   enrichment: {
@@ -320,7 +338,21 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
         `Unsupported browse pair: ${input.target_type} by ${linkType}. Accepted parents for ${input.target_type}: ${PARENTS[input.target_type].join(', ')}.`,
       );
     }
-    const filters: { type?: string; status?: string } = {};
+    const filters: { type?: string; status?: string; release_group_status?: ReleaseGroupStatus } =
+      {};
+    const releaseGroupStatus = input.release_group_status;
+    if (releaseGroupStatus !== undefined) {
+      if (input.target_type !== 'release-group' || linkType !== 'artist') {
+        throw ctx.fail(
+          'invalid_filter',
+          'release_group_status applies only to release-group browse by artist.',
+        );
+      }
+      if (releaseGroupStatus !== 'website-default' && releaseGroupStatus !== 'all') {
+        throw ctx.fail('invalid_filter', 'release_group_status must be website-default or all.');
+      }
+      filters.release_group_status = releaseGroupStatus;
+    }
     for (const field of ['type', 'status'] as const) {
       const supplied = input[field]?.trim();
       if (!supplied) continue;
@@ -405,7 +437,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     }
 
     const key = MusicBrainzService.pluralKey(input.target_type);
-    const rawEntities = (envelope[key] ?? []) as unknown[];
+    const rawEntities: readonly unknown[] = envelope[key] ?? [];
     const entities = rawEntities.map((e) => mapEntity(input.target_type, e));
     const total = envelope[`${input.target_type}-count`];
 
@@ -445,6 +477,9 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
     ];
     if (result.type) lines.push(`**Type filter:** ${safeText(result.type)}`);
     if (result.status) lines.push(`**Status filter:** ${safeText(result.status)}`);
+    if (result.release_group_status) {
+      lines.push(`**Release-group status filter:** ${result.release_group_status}`);
+    }
     for (const e of result.entities) {
       const meta = [
         e.type ? safeText(e.type) : null,
@@ -461,6 +496,7 @@ export const browseEntitiesTool = tool('musicbrainz_browse_entities', {
       lines.push(
         `- **${safeText(e.name)}**${e.disambiguation ? ` (${safeText(e.disambiguation)})` : ''}${meta ? ` — ${meta}` : ''} — ${e.mbid}`,
       );
+      lines.push(...renderReleaseEdition(e));
     }
     return [{ type: 'text', text: lines.join('\n') }];
   },

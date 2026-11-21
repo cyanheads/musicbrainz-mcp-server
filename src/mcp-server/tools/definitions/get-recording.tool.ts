@@ -40,7 +40,7 @@ const ReleaseAppearanceSchema = z
 export const getRecordingTool = tool('musicbrainz_get_recording', {
   title: 'musicbrainz-mcp-server: get recording',
   description:
-    'Recording (a specific performance, distinct from the abstract work) by MBID: length, artist credits, ISRCs, one upstream page of release appearances with completeness metadata, work relationships, and performer/production credits with attributes and dates. Relationships are not capped. Enumerate releases with musicbrainz_browse_entities (target_type=release, link.recording, offset=0); embedded and browse order may differ. Browse recording by work enumerates recording entities; this tool supplies their work relationship details.',
+    'Recording (a specific performance, distinct from the abstract work) by MBID: length, artist credits, ISRCs, one upstream page of release appearances with completeness metadata, work relationships, performer/production credits, and label relationships such as phonographic copyright. Relationships are not capped. Enumerate releases with musicbrainz_browse_entities (target_type=release, link.recording, offset=0); embedded and browse order may differ. Browse recording by work enumerates recording entities; this tool supplies their work relationship details.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -67,7 +67,7 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
       .boolean()
       .default(true)
       .describe(
-        'Include performance/production, work and recording relationships (samples, mashups, music videos, DJ mixes), and external links.',
+        'Include performance/production, work, label (e.g. phonographic copyright) and recording relationships (samples, mashups, music videos, DJ mixes), and external links.',
       ),
   }),
 
@@ -113,7 +113,7 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
     relationships: z
       .array(RelationSchema)
       .describe(
-        'Performance/production, work and recording relationships in upstream order, uncapped (may be empty).',
+        'Performance/production, work, label and recording relationships in upstream order, uncapped (may be empty).',
       ),
     externalLinks: z
       .array(ExternalLinkSchema)
@@ -125,7 +125,8 @@ export const getRecordingTool = tool('musicbrainz_get_recording', {
     const service = getMusicBrainzService();
 
     const inc = ['artist-credits', 'releases', 'isrcs'];
-    if (input.inc_relationships) inc.push('artist-rels', 'work-rels', 'recording-rels', 'url-rels');
+    if (input.inc_relationships)
+      inc.push('artist-rels', 'work-rels', 'recording-rels', 'url-rels', 'label-rels');
 
     let raw: RawRecording;
     try {

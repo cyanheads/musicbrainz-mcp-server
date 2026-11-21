@@ -252,4 +252,104 @@ describe('lookup_identifier — barcode validation', () => {
     expect(text).toContain(`Recovery: ${error.data.recovery.hint}`);
     expect(searchMock).not.toHaveBeenCalled();
   });
+
+  it('retains partial pressing metadata and gives an exact search continuation beyond 25 results', async () => {
+    searchMock.mockResolvedValueOnce({
+      count: 30,
+      releases: [
+        {
+          ...releaseHit,
+          barcode: '075678164125',
+          packaging: 'Jewel Case',
+          'release-group': { id: 'group-id' },
+          'release-events': [
+            { date: '1996', area: null },
+            { area: { 'iso-3166-1-codes': ['GB'] } },
+          ],
+          'label-info': [{ 'catalog-number': 'CAT-52' }, { label: { id: 'label-id' } }],
+          'track-count': 12,
+          media: [{ format: 'CD', 'track-count': 8 }],
+        },
+        ...Array.from({ length: 24 }, (_, i) => ({ id: `other-${i}` })),
+      ],
+    });
+    const outcome = await runToolContract(lookupIdentifierTool, {
+      id_type: 'barcode',
+      value: '0 75678 16412 5',
+    });
+    expect(outcome.structuredContent).toMatchObject({
+      result: {
+        totalCount: 30,
+        releases: expect.arrayContaining([
+          {
+            mbid: 'rel1',
+            title: 'Crash',
+            artistCredit: 'Dave Matthews Band',
+            date: '1996-04-30',
+            country: 'US',
+            score: 100,
+            barcode: '075678164125',
+            packaging: 'Jewel Case',
+            releaseGroupId: 'group-id',
+            releaseEvents: [{ date: '1996' }, { country: 'GB' }],
+            labelInfo: [{ catalogNumber: 'CAT-52' }, { labelId: 'label-id' }],
+            formats: ['CD'],
+            trackCount: 12,
+          },
+        ]),
+      },
+      notice: expect.stringContaining('query=barcode:075678164125, offset=25'),
+    });
+    const text = JSON.stringify(outcome.content);
+    for (const value of [
+      '25 of 30',
+      '1996, GB',
+      'CAT-52',
+      'label-id',
+      'group-id',
+      'Jewel Case',
+      'CD',
+      '12',
+      'query=barcode:075678164125, offset=25',
+    ]) {
+      expect(text).toContain(value);
+    }
+    expect(searchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the not-found reason and recovery for an empty barcode search on both surfaces', async () => {
+    searchMock.mockResolvedValueOnce({ count: 0, releases: [] });
+    const outcome = await runToolContract(lookupIdentifierTool, {
+      id_type: 'barcode',
+      value: '075678164125',
+    });
+    expect(outcome.structuredContent).toMatchObject({
+      error: {
+        data: {
+          reason: 'identifier_not_found',
+          recovery: { hint: expect.stringContaining('Check the value') },
+        },
+      },
+    });
+    expect(JSON.stringify(outcome.content)).toContain('identifier_not_found');
+    expect(JSON.stringify(outcome.content)).toContain('Check the value');
+  });
+
+  it('reports a full barcode page without continuation when the upstream total is 25', async () => {
+    searchMock.mockResolvedValueOnce({
+      count: 25,
+      releases: Array.from({ length: 25 }, (_, i) => ({ id: `release-${i}` })),
+    });
+    const outcome = await runToolContract(lookupIdentifierTool, {
+      id_type: 'barcode',
+      value: '075678164125',
+    });
+    expect(outcome.structuredContent).toMatchObject({ result: { totalCount: 25 } });
+    expect(outcome.structuredContent).not.toHaveProperty('notice');
+    const text = JSON.stringify(outcome.content);
+    expect(text).toContain('Total matches:** 25');
+    expect(text).toContain('release-24');
+    expect(text).not.toContain('Continue with');
+    expect(text).not.toContain('**Track count:**');
+  });
 });

@@ -16,6 +16,124 @@ const mbid = 'd996abaa-ce14-45c7-944a-9c62adee19fe';
 afterEach(() => lookup.mockReset());
 
 describe('release media windows', () => {
+  it('retains scalar edition metadata, external links and a complete selected medium', async () => {
+    lookup.mockResolvedValueOnce({
+      id: mbid,
+      title: 'Edition',
+      country: 'XE',
+      date: '1997',
+      barcode: '',
+      relations: [
+        { type: 'discogs', 'target-type': 'url', url: { resource: 'https://example.com/edition' } },
+      ],
+      media: [
+        {
+          position: 1,
+          tracks: [
+            { position: 1, title: 'First' },
+            { position: 2, title: 'Second' },
+          ],
+        },
+      ],
+    });
+    const result = await runToolContract(getReleaseTool, { mbid, media_limit: 1 });
+    expect(result.structuredContent).toMatchObject({
+      date: '1997',
+      country: 'XE',
+      externalLinks: [{ type: 'discogs', resource: 'https://example.com/edition' }],
+      media: [{ tracks: [{ title: 'First' }, { title: 'Second' }] }],
+    });
+    expect(result.structuredContent).not.toHaveProperty('barcode');
+    expect(JSON.stringify(result.content)).toContain('https://example.com/edition');
+  });
+  it('preserves complete and partial release events in upstream order alongside scalar date and country', async () => {
+    lookup.mockResolvedValueOnce({
+      id: mbid,
+      date: '1997-06-16',
+      country: 'XE',
+      'release-events': [
+        { date: '1997-06', area: { 'iso-3166-1-codes': ['FR'] } },
+        { date: '1997', area: null },
+        { date: null, area: { 'iso-3166-1-codes': ['DE'] } },
+        { date: null, area: { name: 'Unnamed area' } },
+      ],
+    });
+    const result = await runToolContract(getReleaseTool, { mbid });
+    expect(result.structuredContent).toMatchObject({
+      date: '1997-06-16',
+      country: 'XE',
+      releaseEvents: [{ date: '1997-06', country: 'FR' }, { date: '1997' }, { country: 'DE' }],
+    });
+    expect(JSON.stringify(result.content)).toContain('Release events:** 1997-06 (FR), 1997, DE');
+  });
+
+  it('requests artist and label relationships with full track data and the existing URL include', async () => {
+    lookup.mockImplementationOnce(async (_type, _id, options) => ({
+      id: mbid,
+      relations: [
+        ...(options.inc.includes('artist-rels')
+          ? [
+              {
+                type: 'mastering',
+                'target-type': 'artist',
+                artist: { id: 'artist-id', name: 'Mastering Engineer', disambiguation: 'engineer' },
+                attributes: ['digital'],
+                direction: 'backward',
+                begin: '1997',
+                end: '1997-06',
+                'ordering-key': 0,
+              },
+            ]
+          : []),
+        { type: 'discogs', 'target-type': 'url', url: { resource: 'https://example.com/edition' } },
+        ...(options.inc.includes('label-rels')
+          ? [
+              {
+                type: 'pressing',
+                'target-type': 'label',
+                label: { name: 'Pressing Plant' },
+              },
+            ]
+          : []),
+      ],
+      media: [{ tracks: [{ title: 'Track One' }, { title: 'Track Two' }] }],
+    }));
+    const result = await runToolContract(getReleaseTool, { mbid });
+    expect(result.structuredContent).toMatchObject({
+      relationships: [
+        {
+          type: 'mastering',
+          targetType: 'artist',
+          targetId: 'artist-id',
+          targetName: 'Mastering Engineer',
+          targetDisambiguation: 'engineer',
+          attributes: ['digital'],
+          direction: 'backward',
+          begin: '1997',
+          end: '1997-06',
+          orderingKey: 0,
+        },
+        { type: 'pressing', targetType: 'label', targetName: 'Pressing Plant' },
+      ],
+      externalLinks: [{ type: 'discogs', resource: 'https://example.com/edition' }],
+      trackTotal: 2,
+      media: [{ tracks: [{ title: 'Track One' }, { title: 'Track Two' }] }],
+    });
+    const text = JSON.stringify(result.content);
+    expect(text).toContain(
+      'mastering** (digital) backward → artist: Mastering Engineer (artist-id) — engineer [1997–1997-06] [ordering key: 0]',
+    );
+    expect(text).toContain('pressing** → label: Pressing Plant');
+    expect(text).toContain('https://example.com/edition');
+    expect(lookup).toHaveBeenCalledWith(
+      'release',
+      mbid,
+      { inc: expect.arrayContaining(['artist-rels', 'label-rels', 'url-rels', 'recordings']) },
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
   it('keeps media limits unbounded when the search/browse clamp is disabled', async () => {
     vi.stubEnv('MUSICBRAINZ_CLAMP_OVERSIZED_LIMITS', 'off');
     try {

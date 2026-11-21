@@ -87,4 +87,84 @@ describe('recording release appearances', () => {
     expect(lookup.mock.calls[0]?.[2]).toEqual({ inc: ['artist-credits', 'releases', 'isrcs'] });
     expect(lookup).toHaveBeenCalledTimes(1);
   });
+
+  it('exposes phonographic copyright credits in the enabled tool and resource lookups', async () => {
+    const raw = {
+      id: mbid,
+      title: 'Airbag',
+      relations: [
+        {
+          type: 'phonographic copyright',
+          direction: 'backward',
+          'target-type': 'label',
+          label: { id: 'xl', name: 'XL Recordings Ltd.', disambiguation: 'holding company' },
+          begin: '2017',
+          end: '2017',
+        },
+        { type: 'phonographic copyright', 'target-type': 'label', label: { name: 'Sparse' } },
+      ],
+    } satisfies RawRecording;
+    lookup.mockResolvedValue(raw);
+    const result = await runToolContract(getRecordingTool, { mbid });
+    expect(result.structuredContent).toMatchObject({
+      relationships: [
+        {
+          type: 'phonographic copyright',
+          direction: 'backward',
+          targetType: 'label',
+          targetId: 'xl',
+          targetName: 'XL Recordings Ltd.',
+          targetDisambiguation: 'holding company',
+          begin: '2017',
+          end: '2017',
+        },
+        { type: 'phonographic copyright', targetType: 'label', targetName: 'Sparse' },
+      ],
+      releaseAppearanceSummary: { completeness: 'unknown' },
+    });
+    expect(result.structuredContent).not.toHaveProperty('relationships.1.targetId');
+    expect(JSON.stringify(result.content)).toContain(
+      'XL Recordings Ltd. (xl) — holding company [2017–2017]',
+    );
+    expect(JSON.stringify(result.content)).toContain('label: Sparse');
+    expect(lookup.mock.calls[0]?.[2].inc).toContain('label-rels');
+
+    const resource = await entityResource.handler(
+      entityResource.params!.parse({ entity_type: 'recording', mbid }),
+      createMockContext({ errors: entityResource.errors }),
+    );
+    expect(resource).toMatchObject({ relations: raw.relations });
+    expect(lookup.mock.calls[1]?.[2].inc).toContain('label-rels');
+    const disabled = await runToolContract(getRecordingTool, { mbid, inc_relationships: false });
+    expect(disabled.structuredContent).toMatchObject({ relationships: [], externalLinks: [] });
+    expect(JSON.stringify(disabled.content)).not.toContain('phonographic copyright');
+    expect(lookup.mock.calls[2]?.[2].inc).not.toContain('label-rels');
+    expect(lookup).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps raw release tracklists and URLs alongside edition relationship includes', async () => {
+    const raw = {
+      id: mbid,
+      title: 'Edition',
+      media: [{ tracks: [{ title: 'Track' }] }],
+      relations: [
+        { 'target-type': 'artist', type: 'mastering', artist: { name: 'Mastering Engineer' } },
+        { 'target-type': 'label', type: 'copyright', label: { name: 'Rights Holder' } },
+        {
+          'target-type': 'url',
+          type: 'discogs',
+          url: { resource: 'https://www.discogs.com/release/1' },
+        },
+      ],
+    };
+    lookup.mockResolvedValueOnce(raw);
+    const resource = await entityResource.handler(
+      entityResource.params!.parse({ entity_type: 'release', mbid }),
+      createMockContext({ errors: entityResource.errors }),
+    );
+    expect(lookup.mock.calls[0]?.[2].inc).toEqual(
+      expect.arrayContaining(['artist-rels', 'label-rels', 'url-rels', 'labels', 'recordings']),
+    );
+    expect(resource).toEqual(raw);
+  });
 });
